@@ -14,6 +14,7 @@ internal static class CommandTests
     {
         sandbox = Path.Combine(parent, "command-fixtures"); Directory.CreateDirectory(sandbox);
         run("command reset removes only its registered root", TestRemoveFolder);
+        run("command startup accepts UTF-8 console input with a BOM", TestUtf8Input);
         run("command clear preserves root and removes hidden content", TestClearContents);
         run("command roots with apostrophes/spaces are literal", TestLiteralPath);
         run("command rejects changed targets and unknown ids", TestRejectScope);
@@ -43,6 +44,18 @@ internal static class CommandTests
         var result = Run(Runner(Group("gitnexus-data", root)), "gitnexus-data", "logs-remove");
         Assert(result.Error == null && result.ExitCode == 0 && !Directory.Exists(root) && File.Exists(keep), "Reset command exceeded scope or failed: " + result.Error + " " + result.Output);
         Assert(File.ReadAllText(result.LogPath).Contains("START") && File.ReadAllText(result.LogPath).Contains("END exit=0"), "Reset audit missing execution result.");
+    }
+    private static void TestUtf8Input()
+    {
+        string root = Folder("utf8-input"); File.WriteAllText(Path.Combine(root, "file.txt"), "fixture");
+        var previous = Console.InputEncoding;
+        try
+        {
+            Console.InputEncoding = new UTF8Encoding(true);
+            var result = Run(Runner(Group("generic-cache", root)), "generic-cache", "logs-utf8-input");
+            Assert(result.Error == null && result.ExitCode == 0 && Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any(), "UTF-8 startup gate failed: " + result.Error + " " + result.Output);
+        }
+        finally { Console.InputEncoding = previous; }
     }
     private static void TestClearContents()
     {

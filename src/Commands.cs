@@ -192,8 +192,10 @@ namespace CleanSystem
         private static string BuildScript(CommandPlan plan)
         {
             string root = Quote(plan.Root), target = Quote(plan.Target);
+            // Process.StandardInput may emit a console encoding BOM. Detect it before reading the job/audit gate.
             string script = "$ErrorActionPreference = 'Stop'\n[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n" +
-                "if ([Console]::ReadLine() -ne 'RUN') { exit 64 }\ntry {\n" +
+                "$cleanSystemGateReader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [Text.Encoding]::UTF8, $true)\n" +
+                "if ($cleanSystemGateReader.ReadLine() -ne 'RUN') { exit 64 }\ntry {\n" +
                 "$cleanSystemExpected = " + target + "\n" +
                 "if (-not [IO.Directory]::Exists($cleanSystemExpected)) { if ([IO.File]::Exists($cleanSystemExpected)) { throw 'Target is a file.' }; Write-Output 'Thu muc khong ton tai; khong xoa du lieu.'; exit 0 }\n" +
                 "$cleanSystemResolved = Get-Item -LiteralPath $cleanSystemExpected -Force -ErrorAction Stop\n" +
