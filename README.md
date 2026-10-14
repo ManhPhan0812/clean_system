@@ -8,6 +8,8 @@
 
 Yêu cầu Windows 10/11 và .NET Framework 4.8. Tải `DonDepOCung.exe` tại [GitHub Releases](https://github.com/ManhPhan0812/clean_system/releases/latest) và mở trực tiếp, hoặc mở `dist\DonDepOCung.exe` sau khi build.
 
+Nút **Làm mới** cạnh **Dung lượng trống · C:** có trên cả **Dọn file tạm** và **Other / lập trình** để cập nhật dung lượng trống, đã dùng và thanh dung lượng ổ C. Thao tác này giữ kết quả quét và các mục đã chọn; không quét lại thư mục.
+
 1. Chọn thời gian giữ file mới: 1, 7, 14 hoặc 30 ngày (mặc định 7 ngày).
 2. Bấm **Quét ổ C**. Quét chỉ đọc thông tin, chưa xóa dữ liệu.
 3. Chọn nhóm cần dọn, bấm **Xem danh sách** để xem tối đa 1.000 file lớn nhất.
@@ -28,7 +30,7 @@ Báo cáo lỗi là nhóm tùy chọn, không chọn sẵn. Xóa nhóm `ReportQu
 
 Chỉ nhận file có cả ngày tạo và ngày sửa cuối cùng cũ hơn ngưỡng. Trước khi xóa, kiểm tra lại đường dẫn thực tế, mã định danh file, dung lượng và thời gian. Bỏ qua file đang được đọc/ghi, file chỉ đọc, file hệ thống, file offline, hard link, symlink/junction và thư mục có tổ tiên là liên kết. Không đổi quyền hoặc thuộc tính để ép xóa, không xóa thư mục. Việc file tạm đã cũ không đảm bảo ứng dụng tạo ra nó không còn cần nó; xem danh sách và đóng các ứng dụng liên quan trước khi dọn.
 
-Chức năng dọn file tạm không quét/xóa Downloads, Desktop, Documents, Thùng rác, bộ nhớ trình duyệt, Registry, `Windows.old`, `WinSxS`, `SoftwareDistribution`, `pagefile.sys` hoặc `hiberfil.sys`. **Thùng rác** có mục riêng và yêu cầu xác nhận riêng. Nút **Lưu trữ Windows** mở công cụ của Windows để người dùng tự xem thêm các mục. Microsoft mô tả các tùy chọn này tại [Free up drive space in Windows](https://support.microsoft.com/en-us/windows/experience/storage-filemanagement/free-up-drive-space-in-windows).
+Chức năng dọn file tạm không quét/xóa Downloads, Desktop, Documents, Thùng rác, bộ nhớ trình duyệt, Registry, `Windows.old`, `WinSxS`, `SoftwareDistribution`, `pagefile.sys` hoặc `hiberfil.sys`. **Thùng rác** có mục riêng và yêu cầu xác nhận riêng. **Windows Update · Download** trong Other có thao tác riêng để dọn cache cập nhật. Nút **Lưu trữ Windows** mở công cụ của Windows để người dùng tự xem thêm các mục. Microsoft mô tả các tùy chọn này tại [Free up drive space in Windows](https://support.microsoft.com/en-us/windows/experience/storage-filemanagement/free-up-drive-space-in-windows).
 
 Mỗi nhóm quét giới hạn 100.000 mục để kiểm soát bộ nhớ; giao diện thông báo khi kết quả chỉ là một phần. Cột **Tổng** đếm cả file mới và file chỉ đọc; cột **Có thể dọn** chỉ tính file đủ điều kiện xóa. Dấu `≥` biểu thị kết quả một phần. Lần quét bị dừng không thể dùng để dọn. Dung lượng hiển thị là tổng kích thước logic của file; dung lượng trống thực tế có thể khác vì nén, cấp phát ổ đĩa và hoạt động của Windows.
 
@@ -52,6 +54,7 @@ Mở **Other / lập trình** rồi bấm **Quét Other** để đo các vị tr
 
 | Nhóm | Ứng dụng xử lý thế nào |
 | --- | --- |
+| `%WINDIR%\SoftwareDistribution\Download` | **Dọn cache cập nhật**: xác nhận Có/Không, dừng `wuauserv` / `bits`, xóa nội dung `Download`, rồi khởi động lại cả hai dịch vụ. Cần mở ứng dụng bằng **Run as administrator**. |
 | `.gradle\caches` | **Chạy lệnh** xóa toàn bộ thư mục `caches`. **Dọn mục đã chọn** vẫn chỉ xóa cache sinh lại được đủ tuổi. |
 | `.gradle\daemon` | **Chạy lệnh** xóa toàn bộ thư mục `daemon` sau khi đã dừng daemon. **Dọn mục đã chọn** chỉ xóa log đủ tuổi. |
 | `go\pkg\mod`, `%LOCALAPPDATA%\go-build` | Chạy `go clean -modcache` / `go clean -cache`; ghim biến cache vào đường dẫn của dòng đang chọn. Không xóa `go\src` hoặc `go\bin`. |
@@ -68,7 +71,27 @@ Không chọn sẵn nhóm lập trình. Đóng IDE, dừng build và Gradle daem
 
 Runner chỉ chạy thao tác cố định theo ID và đường dẫn đăng ký sẵn, không chạy nguyên văn chuỗi hướng dẫn hoặc cho nhập lệnh tùy ý. Kiểm tra lại đích, các tổ tiên và toàn bộ cây con; từ chối symlink/junction trước khi xóa. PowerShell kiểm tra lại đích và dùng `-LiteralPath`. Không tự nâng quyền. Chạy không có cửa sổ terminal mới; kết quả/mã thoát được hiển thị trong ứng dụng và lưu `command-*.log` tại `%LOCALAPPDATA%\CleanSystem\Logs`. Nếu chưa ghi được nhật ký, lệnh không được khởi chạy. Đầu ra trên giao diện giới hạn khoảng 48 KB; nhật ký giữ đầu ra đầy đủ.
 
-**Dừng** kết thúc cả cây tiến trình bằng Windows Job Object; phần đã xóa không được khôi phục. Lệnh quá 30 phút cũng bị dừng. Sau mọi lần chạy, kể cả lỗi/hủy, xóa snapshot quét cũ và yêu cầu quét lại. Một lệnh xóa gặp file bị khóa hoặc thiếu quyền có thể đã xóa một phần trước khi báo lỗi. File log bị lỗi khi lệnh đang chạy sẽ khiến runner dừng tác vụ; nhật ký không phải bản sao lưu.
+**Dừng** có thể hủy bước kiểm tra thư mục trước khi chạy lệnh; bước này có tiến độ và giới hạn 60 giây. Nếu lỗi/hủy, nhật ký ghi `END precheck` và lệnh chưa được chạy. Với lệnh thông thường, Dừng kết thúc cả cây tiến trình bằng Windows Job Object; phần đã xóa không được khôi phục. Lệnh thông thường quá 30 phút cũng bị dừng. **Ngoại lệ: Windows Update** ẩn nút Dừng khi bắt đầu chạy lệnh để bước khởi động lại dịch vụ có thể hoàn tất. Sau mọi lần chạy, kể cả lỗi/hủy, xóa snapshot quét cũ và yêu cầu quét lại. Một lệnh xóa gặp file bị khóa hoặc thiếu quyền có thể đã xóa một phần trước khi báo lỗi. File log bị lỗi khi lệnh thông thường đang chạy sẽ khiến runner dừng tác vụ; với Windows Update, runner chờ bước khởi động lại dịch vụ rồi báo lỗi nhật ký. Nhật ký không phải bản sao lưu.
+
+### Cache Windows Update
+
+Trong **Other / lập trình**, chọn **Windows Update · Download**. **Quét thư mục này** chỉ đo dung lượng, không dừng dịch vụ. **Dọn cache cập nhật** hiển thị đường dẫn và lưu ý sau trong popup Có/Không:
+
+> Không thực hiện khi Windows đang tải hoặc cài đặt bản cập nhật, hay đang yêu cầu khởi động lại để hoàn tất cập nhật. Nếu có lỗi file đang được sử dụng, không nên cố xóa.
+
+Mục này cần quyền quản trị: đóng ứng dụng rồi nhấp phải `DonDepOCung.exe` → **Run as administrator**. Ứng dụng vẫn khởi động với quyền hiện tại và không tự nâng quyền. Khi chưa chạy bằng quyền admin, nhấp/chọn dòng Windows Update sẽ hiện cảnh báo ngay và không cho truy cập. Quét riêng, Cách dọn và chạy lệnh đều bị chặn trước khi mở chức năng; **Quét Other** bỏ qua mục này, các mục khác vẫn dùng bình thường.
+
+Trước khi dừng dịch vụ, đọc trạng thái Windows Update qua [RebootRequired](https://learn.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-isysteminformation-get_rebootrequired) và [IsBusy](https://learn.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-iupdateinstaller-get_isbusy). Nếu yêu cầu khởi động lại, đang cài/gỡ cập nhật, không đọc được trạng thái hoặc dịch vụ bị Disabled/đang chuyển trạng thái, không dọn. Các kiểm tra này không xác định mọi hoạt động tải cập nhật và không khóa hoạt động cập nhật khác; người dùng vẫn cần kiểm tra Windows Update trước khi xác nhận.
+
+Chỉ xử lý `%WINDIR%\SoftwareDistribution\Download` khi Windows nằm trên ổ C, giữ thư mục gốc và `DataStore`. Kiểm tra lại đích, tổ tiên và các đường dẫn liên kết trước khi dừng dịch vụ, rồi kiểm tra lại sau khi hai dịch vụ đã dừng. Xóa gặp lỗi sẽ dừng ngay, không thử lại, không chiếm quyền sở hữu/đổi ACL hay ép giải phóng file đang dùng. Các gói cập nhật có thể cần tải lại.
+
+Ứng dụng hỗ trợ đường dẫn dài trong bước quét/kiểm tra và dọn cache Windows Update qua API file với tiền tố đường dẫn mở rộng, không thay đổi Registry hay cấu hình Windows. Dọn nội dung có tác dụng tương đương `Remove-Item -Recurse -Force`: xử lý file chỉ đọc nhưng không giải phóng file bị khóa. Số mục đã kiểm tra/xóa được cập nhật trong tiến độ và nhật ký. Mỗi lượt kiểm tra lại đường dẫn có giới hạn 60 giây; bước xóa giới hạn 5 phút và sẽ chuyển sang khởi động lại dịch vụ nếu hết thời gian. Giới hạn được kiểm tra giữa các thao tác file.
+
+Khởi động lại `wuauserv` và `bits` trong `finally`, kể cả khi một lệnh dừng hoặc xóa bị lỗi; lỗi khởi động một dịch vụ không ngăn thử khởi động dịch vụ còn lại. Dừng bằng `Stop-Service -NoWait` rồi đợi mỗi dịch vụ đạt trạng thái mong muốn tối đa 30 giây sau lệnh điều khiển. Lỗi khởi động lại được báo trong kết quả và nhật ký. Có thể bấm Dừng khi đang kiểm tra trước khi chạy lệnh. Khi lệnh đã bắt đầu, nút Dừng bị ẩn và đóng cửa sổ sẽ đợi hoàn tất. Worker cũng không bị kết thúc do Job Object của giao diện bị đóng, để có thể hoàn thành bước khởi động lại dịch vụ. Nếu máy bị tắt hoặc worker bị kết thúc cưỡng bức, vẫn cần kiểm tra lại dịch vụ Windows Update.
+
+Kiểm thử dùng thư mục fixture, dịch vụ và trạng thái cập nhật giả; không dừng/khởi động dịch vụ hoặc dọn cache Windows Update thật. Đối chiếu thao tác dịch vụ tại [tài liệu Microsoft](https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/additional-resources-for-windows-update).
+
+### Đường dẫn và công cụ lập trình
 
 `Remove-Item -Recurse -Force .gitnexus` xóa thư mục tương đối trong vị trí terminal hiện tại. Dòng GitNexus của ứng dụng thống kê `%USERPROFILE%\.gitnexus`; lệnh sao chép nhắm chính xác vị trí đó, xóa cả `indexes`, `registry.json` và dữ liệu khác nếu có. Dừng server/MCP, kiểm tra và sao lưu dữ liệu cần giữ trước khi xóa. Để chỉ xóa index của một dự án, đối chiếu `gitnexus clean` trong đúng dự án theo [mã nguồn chính thức của GitNexus](https://github.com/abhigyanpatwari/GitNexus/blob/main/gitnexus/src/cli/clean.ts); không nhầm thư mục tài khoản với thư mục trong repository.
 
@@ -98,11 +121,13 @@ Kiểm thử tạo fixture riêng trong `test-output`, không dọn thư mục t
 - `src/Cleaner.cs`: chính sách đường dẫn, quét, xóa bằng Windows file handle, nhật ký.
 - `src/Program.cs`: điều khiển giao diện và thao tác bất đồng bộ.
 - `src/Commands.cs`: tạo lệnh cố định, kiểm tra đích, chạy CLI/PowerShell, audit và dừng cây tiến trình.
+- `src/WindowsUpdate.cs`: lưu ý, quyền quản trị, kiểm tra trạng thái cập nhật và thao tác cache với khởi động lại dịch vụ trong finally.
 - `src/RecycleBin.cs`: đọc/dọn Thùng rác trên tất cả ổ đĩa qua Shell API, xác nhận phạm vi, audit và luồng STA.
 - `src/MainWindow.xaml`: giao diện WPF.
 - `tests/CleanerTests.cs`: kiểm thử bằng file và liên kết thật trong fixture.
 - `tests/CommandTests.cs`: chạy lệnh xóa trên fixture, CLI giả, kiểm tra quoting, junction, audit, lỗi và hủy tiến trình con; không chạy lệnh dọn thật của Go/Flutter/FVM.
 - `tests/RecycleBinTests.cs`: kiểm tra phạm vi, xác nhận cũ, lỗi audit/API và trạng thái trống bằng API giả; chỉ kiểm tra API đọc thật của Windows.
+- `tests/WindowsUpdateTests.cs`: kiểm tra cache cập nhật trên fixture, mock toàn bộ dịch vụ/WUA, lỗi stop/start, file bị khóa, kiểm tra lại đích và hoàn thành khởi động lại dịch vụ khi đóng Job Object.
 - `Build.ps1`: build không cần SDK, chạy kiểm thử khi có `-Test`.
 
 Cơ chế xóa tham khảo API Microsoft: [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew) và [SetFileInformationByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle).

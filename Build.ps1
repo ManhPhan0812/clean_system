@@ -16,11 +16,11 @@ $arguments = @('/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/
     ('/out:' + (Join-Path $outputPath 'DonDepOCung.exe')),
     ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')),
     ('/resource:' + (Join-Path $PSScriptRoot 'src\MainWindow.xaml') + ',CleanSystem.MainWindow.xaml'))
-& $compilerPath @arguments @references (Join-Path $PSScriptRoot 'src\Cleaner.cs') (Join-Path $PSScriptRoot 'src\Commands.cs') (Join-Path $PSScriptRoot 'src\RecycleBin.cs') (Join-Path $PSScriptRoot 'src\Program.cs')
+& $compilerPath @arguments @references (Join-Path $PSScriptRoot 'src\Cleaner.cs') (Join-Path $PSScriptRoot 'src\Commands.cs') (Join-Path $PSScriptRoot 'src\RecycleBin.cs') (Join-Path $PSScriptRoot 'src\WindowsUpdate.cs') (Join-Path $PSScriptRoot 'src\Program.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 Write-Host "Built: $outputPath\DonDepOCung.exe"
 if ($Test) {
-    & $compilerPath /nologo /target:exe /warn:4 /utf8output /codepage:65001 "/out:$outputPath\CleanSystem.Tests.exe" /reference:System.dll /reference:System.Core.dll (Join-Path $PSScriptRoot 'src\Cleaner.cs') (Join-Path $PSScriptRoot 'src\Commands.cs') (Join-Path $PSScriptRoot 'src\RecycleBin.cs') (Join-Path $PSScriptRoot 'tests\CleanerTests.cs') (Join-Path $PSScriptRoot 'tests\CommandTests.cs') (Join-Path $PSScriptRoot 'tests\RecycleBinTests.cs')
+    & $compilerPath /nologo /target:exe /warn:4 /utf8output /codepage:65001 "/out:$outputPath\CleanSystem.Tests.exe" /reference:System.dll /reference:System.Core.dll (Join-Path $PSScriptRoot 'src\Cleaner.cs') (Join-Path $PSScriptRoot 'src\Commands.cs') (Join-Path $PSScriptRoot 'src\RecycleBin.cs') (Join-Path $PSScriptRoot 'src\WindowsUpdate.cs') (Join-Path $PSScriptRoot 'tests\CleanerTests.cs') (Join-Path $PSScriptRoot 'tests\CommandTests.cs') (Join-Path $PSScriptRoot 'tests\RecycleBinTests.cs') (Join-Path $PSScriptRoot 'tests\WindowsUpdateTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
     & (Join-Path $outputPath 'CleanSystem.Tests.exe') (Join-Path $PSScriptRoot 'test-output')
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }

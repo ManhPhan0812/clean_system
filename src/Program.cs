@@ -30,6 +30,7 @@ namespace CleanSystem
         [STAThread]
         public static int Main(string[] args)
         {
+            PathPolicy.EnableLongPaths();
             bool smoke = args.Length == 1 && args[0] == "--smoke-test";
             try
             {
@@ -66,6 +67,7 @@ namespace CleanSystem
                     encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
                     using (var stream = File.Create(Path.Combine(directory, "preview-developer.png"))) encoder.Save(stream);
                     controller.VerifyCommandDialogs();
+                    controller.VerifyAdminAccess();
                     controller.VerifyRecyclePage();
                     File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: XAML loaded, controls bound, window rendered; no scan or deletion performed.", Encoding.UTF8);
                     controller.Window.Close();
@@ -86,34 +88,53 @@ namespace CleanSystem
     internal sealed class MainController
     {
         public Window Window { get; private set; }
-        private readonly Cleaner cleaner = new Cleaner();
+        private readonly Cleaner cleaner;
+        private readonly Func<bool> administrator;
+        private readonly Action<string> accessWarning;
         private readonly CommandRunner commandRunner = new CommandRunner();
         private readonly RecycleBinService recycleService = new RecycleBinService();
         private readonly string logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"CleanSystem\Logs");
         private ScanResult scan;
         private CancellationTokenSource cancellation;
         private bool busy;
+        private bool busyCanCancel;
         private bool developerMode;
         private bool recycleMode;
         private RecycleBinInfo recycleInfo;
         private Button scanButton, cleanButton, previewButton, cancelButton, guideButton, homeButton, developerButton;
+        private Button diskRefreshButton;
         private Button recycleNavButton, recycleRefreshButton, recycleEmptyButton, recycleOpenButton;
         private DataGrid groupsGrid;
         private ComboBox ageBox;
         private TextBlock statusText, selectedText, selectedCountText;
 
-        public MainController()
+        public MainController(Func<bool> adminProbe = null, Action<string> warning = null)
         {
+            administrator = adminProbe ?? WindowsUpdateCache.IsAdministrator;
+            cleaner = new Cleaner(administrator);
+            accessWarning = warning ?? (message => MessageBox.Show(Window, message, "Cần quyền quản trị", MessageBoxButton.OK, MessageBoxImage.Warning));
             using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream("CleanSystem.MainWindow.xaml"))
                 Window = (Window)XamlReader.Load(source);
             scanButton = Find<Button>("ScanButton"); cleanButton = Find<Button>("CleanButton");
             previewButton = Find<Button>("PreviewButton"); cancelButton = Find<Button>("CancelButton");
             guideButton = Find<Button>("GuideButton"); homeButton = Find<Button>("HomeButton"); developerButton = Find<Button>("DeveloperButton");
+            diskRefreshButton = Find<Button>("DiskRefreshButton");
             recycleNavButton = Find<Button>("RecycleNavButton"); recycleRefreshButton = Find<Button>("RecycleRefreshButton");
             recycleEmptyButton = Find<Button>("RecycleEmptyButton"); recycleOpenButton = Find<Button>("RecycleOpenButton");
             groupsGrid = Find<DataGrid>("GroupsGrid"); ageBox = Find<ComboBox>("AgeBox");
             statusText = Find<TextBlock>("StatusText"); selectedText = Find<TextBlock>("SelectedText"); selectedCountText = Find<TextBlock>("SelectedCountText");
             ResetGroups();
+            groupsGrid.PreviewMouseDown += delegate(object sender, System.Windows.Input.MouseButtonEventArgs e) {
+                if (busy) return;
+                var source = e.OriginalSource as DependencyObject;
+                var row = source == null ? null : ItemsControl.ContainerFromElement(groupsGrid, source) as DataGridRow;
+                var group = row == null ? null : row.Item as CleanupGroup;
+                if (group != null && !CanAccessGroup(group.Id)) { e.Handled = true; WarnGroupAccess(); }
+            };
+            groupsGrid.SelectionChanged += delegate {
+                var group = groupsGrid.SelectedItem as CleanupGroup;
+                if (group != null && !CanAccessGroup(group.Id)) { groupsGrid.SelectedItem = null; WarnGroupAccess(); }
+            };
             groupsGrid.AddHandler(CheckBox.CheckedEvent, new RoutedEventHandler(SelectionChanged));
             groupsGrid.AddHandler(CheckBox.UncheckedEvent, new RoutedEventHandler(SelectionChanged));
             groupsGrid.AddHandler(Button.ClickEvent, new RoutedEventHandler(async delegate(object sender, RoutedEventArgs e) {
@@ -126,6 +147,7 @@ namespace CleanSystem
                 await ScanAsync(group.Id);
             }));
             scanButton.Click += async delegate { await ScanAsync(); };
+            diskRefreshButton.Click += delegate { RefreshDisk(); };
             cleanButton.Click += async delegate { await CleanAsync(); };
             previewButton.Click += delegate { ShowPreview(); };
             guideButton.Click += delegate { ShowGuide(); };
@@ -154,6 +176,7 @@ namespace CleanSystem
                 {
                     e.Cancel = true;
                     if (recycleMode) { Find<TextBlock>("RecycleStatusText").Text = "Đang chờ Windows hoàn tất. Có thể đóng cửa sổ khi thao tác kết thúc."; return; }
+                    if (!busyCanCancel) { statusText.Text = "Đang chờ dọn cache Windows Update và khởi động lại dịch vụ. Đóng cửa sổ sau khi thao tác kết thúc."; return; }
                     RequestCancel(); statusText.Text = "Đang dừng thao tác. Bạn có thể đóng cửa sổ khi thao tác kết thúc.";
                 }
             };
@@ -163,7 +186,20 @@ namespace CleanSystem
         }
         private void ResetGroups()
         {
-            groupsGrid.ItemsSource = cleaner.NewGroups().Where(g => g.IsDeveloper == developerMode).ToList();
+            var groups = cleaner.NewGroups().Where(g => g.IsDeveloper == developerMode).ToList();
+            foreach (var group in groups) if (!CanAccessGroup(group.Id)) group.State = "Cần Run as administrator · không được truy cập";
+            groupsGrid.ItemsSource = groups;
+        }
+        private bool CanAccessGroup(string groupId) { return groupId != WindowsUpdateCache.GroupId || administrator(); }
+        private void WarnGroupAccess()
+        {
+            statusText.Text = "Windows Update · Download bị khóa. Mở ứng dụng bằng Run as administrator.";
+            accessWarning(WindowsUpdateCache.AccessWarning);
+        }
+        private bool RequireGroupAccess(string groupId)
+        {
+            if (CanAccessGroup(groupId)) return true;
+            WarnGroupAccess(); return false;
         }
         public void SetMode(bool developer)
         {
@@ -171,10 +207,10 @@ namespace CleanSystem
             recycleMode = false; Find<Grid>("RecyclePage").Visibility = Visibility.Collapsed; Find<Grid>("CleanupPage").Visibility = Visibility.Visible;
             recycleNavButton.Background = Brushes.Transparent; recycleNavButton.Foreground = new SolidColorBrush(Color.FromRgb(180, 192, 212));
             developerMode = developer; scan = null; ResetGroups(); UpdateSelection();
-            Find<TextBlock>("PageLabel").Text = developer ? "OTHER  /  CÔNG CỤ LẬP TRÌNH" : "DỌN DẸP  /  Ổ C";
+            Find<TextBlock>("PageLabel").Text = developer ? "OTHER  /  CACHE VÀ CÔNG CỤ" : "DỌN DẸP  /  Ổ C";
             Find<TextBlock>("PageTitle").Text = developer ? "Biết dữ liệu nào đang chiếm chỗ." : "Thêm chỗ trống. Bớt file tạm.";
-            Find<TextBlock>("PageSubtitle").Text = developer ? "Đo dung lượng, phân biệt cache với SDK và dữ liệu cần giữ." : "Xem dung lượng có thể dọn trước khi quyết định xóa.";
-            Find<TextBlock>("ListTitle").Text = developer ? "Cache và dữ liệu lập trình" : "Chọn nhóm cần dọn";
+            Find<TextBlock>("PageSubtitle").Text = developer ? "Đo cache Windows Update, cache lập trình, SDK và dữ liệu cần giữ." : "Xem dung lượng có thể dọn trước khi quyết định xóa.";
+            Find<TextBlock>("ListTitle").Text = developer ? "Cache và dữ liệu công cụ" : "Chọn nhóm cần dọn";
             Find<TextBlock>("ListSubtitle").Text = developer ? "Quét riêng hoặc chạy lệnh trên từng dòng. Lệnh chạy cần xác nhận thư mục đích." : "File tạm được chọn sẵn. Báo cáo lỗi là tùy chọn.";
             Find<TextBlock>("SafetyText").Text = developer ? "Chạy lệnh dọn toàn bộ theo thao tác của từng mục, không áp dụng tuổi file. Kiểm tra lệnh và đích trong bước xác nhận; reset dữ liệu ứng dụng có thể mất cấu hình/lịch sử. Nút Dọn mục đã chọn vẫn chỉ dọn file đủ điều kiện." : "Chỉ dọn các thư mục tạm cho phép trên ổ C. Bỏ qua file đang dùng và đường dẫn liên kết. Không đụng tới Downloads, tài liệu, Registry hay file hệ thống.";
             scanButton.Content = developer ? "Quét Other" : "Quét ổ C";
@@ -212,6 +248,12 @@ namespace CleanSystem
         }
         public void VerifyInitialUi()
         {
+            if (!diskRefreshButton.IsVisible || !diskRefreshButton.IsEnabled) throw new InvalidOperationException("Disk refresh button is unavailable on this page.");
+            var previousGroups = groupsGrid.ItemsSource; var previousScan = scan;
+            Find<TextBlock>("FreeText").Text = "Chưa cập nhật";
+            diskRefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (Find<TextBlock>("FreeText").Text == "Chưa cập nhật" || !Object.ReferenceEquals(previousGroups, groupsGrid.ItemsSource) || !Object.ReferenceEquals(previousScan, scan))
+                throw new InvalidOperationException("Disk refresh did not update capacity or unexpectedly rescanned folders.");
             if (cleanButton.IsEnabled || previewButton.IsEnabled) throw new InvalidOperationException("Cleanup must be disabled before a scan.");
             var groups = ((IEnumerable<CleanupGroup>)groupsGrid.ItemsSource).ToList();
             if (groups.Any(g => g.Selected != (!developerMode && (g.Id == "user-temp" || g.Id == "windows-temp"))))
@@ -278,7 +320,7 @@ namespace CleanSystem
         }
         private void SetBusy(bool value, bool cancellable = true)
         {
-            busy = value; scanButton.IsEnabled = !value; ageBox.IsEnabled = !value; groupsGrid.IsEnabled = !value;
+            busy = value; busyCanCancel = value && cancellable; scanButton.IsEnabled = !value; ageBox.IsEnabled = !value; groupsGrid.IsEnabled = !value;
             homeButton.IsEnabled = !value; developerButton.IsEnabled = !value; guideButton.IsEnabled = !value;
             recycleNavButton.IsEnabled = !value; recycleRefreshButton.IsEnabled = !value; recycleOpenButton.IsEnabled = !value;
             Find<ProgressBar>("RecycleProgress").Visibility = value && recycleMode ? Visibility.Visible : Visibility.Collapsed;
@@ -287,6 +329,7 @@ namespace CleanSystem
         }
         private void RequestCancel()
         {
+            if (!busyCanCancel) return;
             if (cancellation != null) cancellation.Cancel();
             cancelButton.IsEnabled = false; statusText.Text = "Đang dừng sau mục hiện tại…";
         }
@@ -297,6 +340,7 @@ namespace CleanSystem
             var displayedGroups = ((IEnumerable<CleanupGroup>)groupsGrid.ItemsSource).ToList();
             var target = singleFolder ? displayedGroups.FirstOrDefault(g => g.Id == groupId && g.IsDeveloper) : null;
             if (singleFolder && (!developerMode || target == null)) return;
+            if (singleFolder && !RequireGroupAccess(groupId)) return;
             if (!singleFolder) { scan = null; ResetGroups(); }
             cancellation = new CancellationTokenSource(); SetBusy(true);
             int days = Int32.Parse(((ComboBoxItem)ageBox.SelectedItem).Tag.ToString());
@@ -432,6 +476,7 @@ namespace CleanSystem
         {
             var group = groupsGrid.SelectedItem as CleanupGroup;
             if (group == null) { statusText.Text = "Chọn một dòng trong danh sách rồi bấm Cách dọn."; return; }
+            if (!RequireGroupAccess(group.Id)) return;
             var dialog = new Window { Owner = Window, Title = "Cách dọn · " + group.Name, Width = 720, Height = 560, MinWidth = 550, MinHeight = 400,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = Brushes.White, FontFamily = new FontFamily("Segoe UI"), FontSize = 14 };
             var outer = new DockPanel { Margin = new Thickness(24) };
@@ -484,14 +529,71 @@ namespace CleanSystem
         {
             ConfirmCommand(commandRunner.Prepare("gradle-caches"), true);
             ConfirmCommand(commandRunner.Prepare("codex-data"), true, true);
+            var updatePlan = commandRunner.Prepare(WindowsUpdateCache.GroupId);
+            if (!updatePlan.Description.Contains(WindowsUpdateCache.Warning)) throw new InvalidOperationException("Windows Update confirmation is missing its warning.");
+            ConfirmCommand(updatePlan, true);
+            cancellation = new CancellationTokenSource(); SetBusy(true);
+            if (!cancelButton.IsEnabled || cancelButton.Visibility != Visibility.Visible) throw new InvalidOperationException("Preflight cancellation is unavailable.");
+            RequestCancel();
+            if (!cancellation.IsCancellationRequested) throw new InvalidOperationException("Preflight cancellation did not reach the validator.");
+            cancellation.Dispose(); cancellation = null;
+            SetBusy(true, false);
+            if (cancelButton.Visibility != Visibility.Collapsed || cancelButton.IsEnabled || groupsGrid.IsEnabled)
+                throw new InvalidOperationException("Windows Update operation must wait for service recovery without cancellation.");
+            RequestCancel();
+            Window.Close();
+            if (!Window.IsVisible || !statusText.Text.Contains("khởi động lại dịch vụ"))
+                throw new InvalidOperationException("Window closed before service recovery finished.");
+            SetBusy(false);
             ConfirmAction("Xác nhận dọn file tạm", "Xóa vĩnh viễn các file tạm đã chọn?\n\nDữ liệu mẫu kiểm thử; không thực hiện xóa.", null, "preview-confirm-temp.png");
             ConfirmAction("Xác nhận dọn Thùng rác · Tất cả ổ đĩa", "Xóa vĩnh viễn toàn bộ mục trong Thùng rác trên tất cả ổ đĩa?\n\nDữ liệu mẫu kiểm thử; không gọi API xóa.", null, "preview-confirm-recycle.png");
         }
+        public void VerifyAdminAccess()
+        {
+            bool elevated = false; int warnings = 0;
+            var controller = new MainController(() => elevated, message => {
+                if (message != WindowsUpdateCache.AccessWarning) throw new InvalidOperationException("Missing administrator warning.");
+                warnings++;
+            });
+            controller.Window.Owner = Window; controller.Window.ShowActivated = false;
+            controller.Window.ShowInTaskbar = false; controller.Window.Opacity = 0;
+            controller.Window.Show(); controller.SetMode(true);
+            controller.Window.Dispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(delegate { }));
+            var groups = ((IEnumerable<CleanupGroup>)controller.groupsGrid.ItemsSource).ToList();
+            var locked = groups.Single(g => g.Id == WindowsUpdateCache.GroupId);
+            if (!locked.State.Contains("không được truy cập")) throw new InvalidOperationException("Locked row has no administrator notice.");
+            var row = (DataGridRow)controller.groupsGrid.ItemContainerGenerator.ContainerFromItem(locked);
+            if (row == null) throw new InvalidOperationException("Windows Update row did not render.");
+            var click = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, System.Windows.Input.MouseButton.Left) {
+                RoutedEvent = UIElement.PreviewMouseDownEvent, Source = row
+            };
+            row.RaiseEvent(click);
+            if (!click.Handled || warnings != 1 || controller.groupsGrid.SelectedItem != null)
+                throw new InvalidOperationException("Non-admin mouse access was not blocked immediately.");
+            controller.groupsGrid.SelectedItem = locked;
+            if (warnings != 2 || controller.groupsGrid.SelectedItem != null)
+                throw new InvalidOperationException("Non-admin keyboard/selection access was not blocked.");
+            controller.ScanAsync(locked.Id).GetAwaiter().GetResult();
+            controller.RunCommandAsync(locked.Id).GetAwaiter().GetResult();
+            if (warnings != 4 || controller.busy || controller.scan != null || locked.Measured)
+                throw new InvalidOperationException("Non-admin action reached scanning or command confirmation.");
+            elevated = true; controller.groupsGrid.SelectedItem = locked;
+            if (controller.groupsGrid.SelectedItem != locked || !controller.RequireGroupAccess(locked.Id) || warnings != 4)
+                throw new InvalidOperationException("Administrator could not access Windows Update.");
+            elevated = false; controller.ShowGuide();
+            if (warnings != 5 || !controller.RequireGroupAccess("gradle-caches") || warnings != 5)
+                throw new InvalidOperationException("Guide access bypassed the administrator check or other groups were blocked.");
+            controller.groupsGrid.SelectedItem = groups.First(g => g.Id == "gradle-caches");
+            if (controller.groupsGrid.SelectedItem == null || warnings != 5) throw new InvalidOperationException("Other groups are incorrectly restricted.");
+            controller.Window.Close();
+        }
         private bool ConfirmCommand(CommandPlan plan, bool preview = false, bool previewAccept = false)
         {
+            bool update = plan.Action == CommandAction.WindowsUpdateDownloads;
             string message = "Đích: " + plan.Target + "\n\n" + plan.Description +
-                "\n\nXóa vĩnh viễn, không qua Thùng rác. Ngưỡng 7/14/30 ngày không áp dụng cho lệnh này. Dừng giữa chừng không khôi phục được phần đã xóa.\n\nBạn có muốn chạy lệnh này?";
-            return ConfirmAction("Xác nhận chạy lệnh", message, plan.DisplayCommand, preview ? "preview-confirm-" + plan.GroupId + ".png" : null, previewAccept);
+                "\n\nXóa vĩnh viễn, không qua Thùng rác. Ngưỡng 7/14/30 ngày không áp dụng cho lệnh này." +
+                (update ? "" : " Dừng giữa chừng không khôi phục được phần đã xóa.") + "\n\nBạn có muốn chạy lệnh này?";
+            return ConfirmAction(update ? "Xác nhận dọn cache Windows Update" : "Xác nhận chạy lệnh", message, plan.DisplayCommand, preview ? "preview-confirm-" + plan.GroupId + ".png" : null, previewAccept);
         }
         private bool ConfirmAction(string title, string message, string command = null, string previewFile = null, bool previewAccept = false)
         {
@@ -538,6 +640,7 @@ namespace CleanSystem
             if (busy || !developerMode) return;
             var group = ((IEnumerable<CleanupGroup>)groupsGrid.ItemsSource).FirstOrDefault(g => g.Id == groupId);
             if (group == null || !group.CanRunCommand) return;
+            if (!RequireGroupAccess(groupId)) return;
             CommandPlan plan;
             try
             {
@@ -563,8 +666,9 @@ namespace CleanSystem
             CommandResult result = null;
             try
             {
-                result = await Task.Run(() => commandRunner.Run(plan, logDirectory, operation.Token, line => ((IProgress<string>)progress).Report(line)));
-                statusText.Text = result.Canceled ? "Đã dừng cây tiến trình. Dữ liệu đã xóa không được khôi phục; hãy quét lại." : result.Error != null ? "Lệnh chưa hoàn tất: " + result.Error : "Lệnh hoàn tất (mã 0). Quét lại thư mục để cập nhật dung lượng.";
+                result = await Task.Run(() => commandRunner.Run(plan, logDirectory, operation.Token, line => ((IProgress<string>)progress).Report(line),
+                    () => Window.Dispatcher.Invoke(new Action(() => SetBusy(true, false)))));
+                statusText.Text = result.Canceled ? (result.Started ? "Đã dừng cây tiến trình. Dữ liệu đã xóa không được khôi phục; hãy quét lại." : "Đã dừng kiểm tra thư mục; chưa chạy lệnh hoặc xóa dữ liệu.") : result.Error != null ? "Lệnh chưa hoàn tất: " + result.Error : "Lệnh hoàn tất (mã 0). Quét lại thư mục để cập nhật dung lượng.";
             }
             catch (Exception e) { statusText.Text = "Lệnh gặp lỗi: " + e.Message; ShowError(e.Message); }
             finally

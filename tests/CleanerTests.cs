@@ -17,6 +17,7 @@ internal static class CleanerTests
 
     public static int Main(string[] args)
     {
+        PathPolicy.EnableLongPaths();
         if (args.Length == 2 && args[0] == "--command-worker") return CommandTests.Worker(args[1]);
         try
         {
@@ -45,6 +46,7 @@ internal static class CleanerTests
             Run("canceling a folder rescan clears only that folder's cleanup candidates", TestCanceledFolderRescan);
             CommandTests.RunAll(sandbox, Run);
             RecycleBinTests.RunAll(sandbox, Run);
+            WindowsUpdateTests.RunAll(sandbox, Run);
             Console.WriteLine("PASS: " + passed + " tests. Fixtures retained at " + sandbox);
             return 0;
         }

@@ -118,6 +118,22 @@ namespace CleanSystem
 
     internal static class PathPolicy
     {
+        public static void EnableLongPaths()
+        {
+            AppContext.SetSwitch("Switch.System.IO.UseLegacyPathHandling", false);
+            AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
+        }
+        public static string IOPath(string path)
+        {
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+            string full = System.IO.Path.GetFullPath(path);
+            return full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full.Substring(2) : @"\\?\" + full;
+        }
+        public static string DisplayPath(string path)
+        {
+            if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + path.Substring(8);
+            return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path.Substring(4) : path;
+        }
         public static string Normalize(string path)
         {
             if (String.IsNullOrWhiteSpace(path)) throw new ArgumentException("Đường dẫn trống.");
@@ -132,7 +148,7 @@ namespace CleanSystem
             string current = Normalize(path);
             while (!String.IsNullOrEmpty(current))
             {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
+                if ((File.GetAttributes(IOPath(current)) & FileAttributes.ReparsePoint) != 0) return true;
                 DirectoryInfo parent = Directory.GetParent(current);
                 current = parent == null ? null : parent.FullName;
             }
@@ -149,15 +165,17 @@ namespace CleanSystem
         private readonly List<CleanupGroup> definitions;
         private readonly HashSet<string> allowedRoots;
         private readonly Func<bool> javaIsActive;
+        private readonly Func<bool> administrator;
         private const int ScanLimit = 100000;
 
         // Production roots cannot be supplied by the UI or command-line arguments.
-        public Cleaner() : this(DefaultGroups()) { }
-        internal Cleaner(IEnumerable<CleanupGroup> groups, Func<bool> javaActivityProbe = null)
+        public Cleaner(Func<bool> adminActivityProbe = null) : this(DefaultGroups(), null, adminActivityProbe) { }
+        internal Cleaner(IEnumerable<CleanupGroup> groups, Func<bool> javaActivityProbe = null, Func<bool> adminActivityProbe = null)
         {
             definitions = groups.ToList();
             allowedRoots = new HashSet<string>(definitions.Select(g => g.Root), StringComparer.OrdinalIgnoreCase);
             javaIsActive = javaActivityProbe ?? JavaMayBeActive;
+            administrator = adminActivityProbe ?? WindowsUpdateCache.IsAdministrator;
         }
         public List<CleanupGroup> NewGroups()
         {
@@ -188,6 +206,8 @@ namespace CleanSystem
             string gradle = Path.Combine(user, ".gradle");
             const string gradleDoc = "https://docs.gradle.org/current/userguide/directory_layout.html";
             return new[] {
+                new CleanupGroup(WindowsUpdateCache.GroupId, "Windows Update · Download", "Cache cập nhật đã tải · cần quyền quản trị", WindowsUpdateCache.Root, true, CleanupRule.InspectOnly,
+                    WindowsUpdateCache.Guidance, WindowsUpdateCache.DisplayCommand(WindowsUpdateCache.Root), "https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/additional-resources-for-windows-update"),
                 new CleanupGroup("gradle-caches", "Gradle · caches", "Dọn cache sinh lại được; giữ dependency và lock", Path.Combine(gradle, "caches"), true, CleanupRule.GradleDerived,
                     "Đóng Android Studio/IDE, dừng build và Gradle daemon trước khi dọn. Ứng dụng chỉ dọn file cũ trong build-cache-N, jars-N, transforms-N; giữ modules-2, metadata, lock và cấu hình. Lệnh PowerShell bên dưới là lựa chọn xóa toàn bộ thư mục caches, gồm cả dependency và metadata, không áp dụng ngưỡng tuổi file. Sau khi chạy, Gradle phải tạo lại cache và có thể tải lại dependency; build offline có thể không hoạt động. gradle.properties, wrapper và jdks nằm ngoài đích xóa. Trong dự án có Gradle Wrapper, dùng .\\gradlew.bat --stop; có thể cần dừng daemon của các phiên bản khác. Kiểm tra đường dẫn trước khi chạy; GRADLE_USER_HOME tùy chỉnh có thể nằm nơi khác.",
                     "# PowerShell: dừng daemon trong dự án Gradle trước khi xóa\n# .\\gradlew.bat --stop\n" + FolderResetCommand(Path.Combine(gradle, "caches")), gradleDoc),
@@ -274,10 +294,12 @@ namespace CleanSystem
             {
                 result.Groups = result.Groups.Where(g => String.Equals(g.Id, groupId, StringComparison.Ordinal)).ToList();
                 if (result.Groups.Count != 1) throw new ArgumentException("Thư mục không thuộc phạm vi quét hiện tại.", "groupId");
+                if (groupId == WindowsUpdateCache.GroupId && !administrator()) throw new UnauthorizedAccessException(WindowsUpdateCache.AccessWarning);
             }
             foreach (var group in result.Groups)
             {
                 if (token.IsCancellationRequested) { result.Canceled = true; break; }
+                if (group.Id == WindowsUpdateCache.GroupId && !administrator()) { group.State = "Cần Run as administrator · không được truy cập"; continue; }
                 if (!Directory.Exists(group.Root)) { group.State = "Không có / không truy cập được"; continue; }
                 group.Measured = true;
                 int skippedBefore = result.Skipped;
@@ -295,17 +317,18 @@ namespace CleanSystem
                         {
                             if (PathPolicy.HasLinkedAncestor(directory)) { result.Skipped++; group.Partial = true; continue; }
                             // Lazy enumeration and a hard limit keep memory bounded in huge Temp folders.
-                            foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
+                            foreach (string ioEntry in Directory.EnumerateFileSystemEntries(PathPolicy.IOPath(directory)))
                             {
+                                string entry = PathPolicy.DisplayPath(ioEntry);
                                 if (token.IsCancellationRequested) break;
                                 if (groupInspected >= ScanLimit) { limited = true; result.Limited = true; break; }
                                 result.Inspected++; groupInspected++;
                                 try
                                 {
-                                    FileAttributes attributes = File.GetAttributes(entry);
+                                    FileAttributes attributes = File.GetAttributes(ioEntry);
                                     if ((attributes & FileAttributes.ReparsePoint) != 0) { result.Skipped++; group.Partial = true; continue; }
                                     if ((attributes & FileAttributes.Directory) != 0) { pending.Push(entry); continue; }
-                                    var info = new FileInfo(entry);
+                                    var info = new FileInfo(ioEntry);
                                     group.TotalBytes += info.Length; group.TotalCount++;
                                     if (!group.CanClean || javaActive || !MatchesRule(group, entry)) continue;
                                     if (UnsafeAttributes(attributes)) { result.Skipped++; continue; }
@@ -417,7 +440,7 @@ namespace CleanSystem
         private static SafeFileHandle Open(string path, bool deleting)
         {
             // OPEN_REPARSE_POINT prevents following the final component; zero sharing blocks active readers/writers on deletion.
-            var handle = CreateFile(path, deleting ? 0x00010080u : 0x00000080u, deleting ? 0u : 7u, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+            var handle = CreateFile(PathPolicy.IOPath(path), deleting ? 0x00010080u : 0x00000080u, deleting ? 0u : 7u, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
             if (handle.IsInvalid) { int error = Marshal.GetLastWin32Error(); handle.Dispose(); throw new Win32Exception(error); }
             return handle;
         }

@@ -13,7 +13,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace CleanSystem
 {
-    internal enum CommandAction { None, RemoveFolder, ClearContents, GoModules, GoBuild, PubCache, FvmVersion, OpenEditor }
+    internal enum CommandAction { None, RemoveFolder, ClearContents, GoModules, GoBuild, PubCache, FvmVersion, OpenEditor, WindowsUpdateDownloads }
 
     internal sealed class CommandPlan
     {
@@ -32,6 +32,7 @@ namespace CleanSystem
     {
         public int ExitCode = -1;
         public bool Canceled;
+        public bool Started;
         public string Error;
         public string LogPath;
         public string Output;
@@ -44,17 +45,20 @@ namespace CleanSystem
         private readonly Func<string, string> resolveTool;
         private readonly Func<bool> javaActive;
         private readonly Func<bool> codexActive;
+        private readonly Func<bool> administrator;
 
         public CommandRunner() : this(new Cleaner().NewGroups(), true, ResolveTool, Cleaner.JavaMayBeActive, CodexMayBeActive) { }
-        internal CommandRunner(IEnumerable<CleanupGroup> groups, bool requireC, Func<string, string> resolver, Func<bool> javaProbe, Func<bool> codexProbe)
+        internal CommandRunner(IEnumerable<CleanupGroup> groups, bool requireC, Func<string, string> resolver, Func<bool> javaProbe, Func<bool> codexProbe, Func<bool> adminProbe = null)
         {
             definitions = groups.ToList(); requireCDrive = requireC;
             resolveTool = resolver; javaActive = javaProbe; codexActive = codexProbe;
+            administrator = adminProbe ?? WindowsUpdateCache.IsAdministrator;
         }
         public static CommandAction ActionFor(string id)
         {
             switch (id)
             {
+                case WindowsUpdateCache.GroupId: return CommandAction.WindowsUpdateDownloads;
                 case "gradle-caches": case "gradle-daemon": case "gitnexus-data": return CommandAction.RemoveFolder;
                 case "maven-repository": case "generic-cache": case "codex-data": case "gemini-data": return CommandAction.ClearContents;
                 case "go-modules": return CommandAction.GoModules;
@@ -69,6 +73,7 @@ namespace CleanSystem
         {
             switch (ActionFor(id))
             {
+                case CommandAction.WindowsUpdateDownloads: return "Dọn cache cập nhật";
                 case CommandAction.FvmVersion: return "Chọn SDK / chạy";
                 case CommandAction.OpenEditor: return id == "cursor-extensions" ? "Mở Cursor" : "Mở VS Code";
                 default: return "Chạy lệnh";
@@ -87,6 +92,10 @@ namespace CleanSystem
             var plan = new CommandPlan { GroupId = id, Root = group.Root, Target = group.Root, Action = ActionFor(id), Version = version };
             switch (plan.Action)
             {
+                case CommandAction.WindowsUpdateDownloads:
+                    plan.DisplayCommand = WindowsUpdateCache.DisplayCommand(group.Root);
+                    plan.Description = WindowsUpdateCache.Guidance;
+                    break;
                 case CommandAction.RemoveFolder:
                     plan.DisplayCommand = "Remove-Item -LiteralPath " + Quote(group.Root) + " -Recurse -Force";
                     plan.Description = id == "gitnexus-data" ? "Xóa toàn bộ .gitnexus của tài khoản, gồm indexes và registry.json. Dừng GitNexus server/MCP trước khi chạy." : "Xóa toàn bộ thư mục, gồm dependency/cache hoặc dữ liệu daemon. Đóng IDE, dừng build và các Gradle daemon trước khi chạy.";
@@ -155,13 +164,28 @@ namespace CleanSystem
         }
         public static string Quote(string text) { return "'" + text.Replace("'", "''") + "'"; }
 
-        internal static void ValidateTree(string target, CancellationToken token)
+        internal static void ValidateTree(string target, CancellationToken token, Action<int, string> progress = null, TimeSpan? timeout = null)
         {
+            var timer = Stopwatch.StartNew();
+            TimeSpan limit = timeout ?? TimeSpan.FromSeconds(60);
+            int checkedEntries = 0; long lastReport = 0;
+            Action check = () => {
+                token.ThrowIfCancellationRequested();
+                if (timer.Elapsed >= limit) throw new TimeoutException("Kiểm tra thư mục vượt quá " + limit.TotalSeconds.ToString("0") + " giây. Đã dừng trước khi chạy lệnh; chưa dừng dịch vụ hoặc xóa dữ liệu.");
+            };
+            if (progress != null) progress(0, target);
+            check();
             if (!Directory.Exists(target))
             {
                 if (File.Exists(target)) throw new IOException("Đích là file, không phải thư mục.");
                 string parent = Path.GetDirectoryName(target);
-                while (!Directory.Exists(parent)) parent = Path.GetDirectoryName(parent);
+                while (!Directory.Exists(parent)) {
+                    check();
+                    if (String.IsNullOrEmpty(parent)) throw new IOException("Không tìm thấy thư mục tổ tiên truy cập được; chưa chạy lệnh.");
+                    string next = Path.GetDirectoryName(parent);
+                    if (String.Equals(next, parent, StringComparison.OrdinalIgnoreCase)) throw new IOException("Không xác minh được thư mục tổ tiên; chưa chạy lệnh.");
+                    parent = next;
+                }
                 if (PathPolicy.HasLinkedAncestor(parent)) throw new IOException("Bỏ qua đường dẫn liên kết.");
                 return;
             }
@@ -169,14 +193,23 @@ namespace CleanSystem
             var pending = new Stack<string>(); pending.Push(target);
             while (pending.Count > 0)
             {
-                token.ThrowIfCancellationRequested();
-                foreach (string entry in Directory.EnumerateFileSystemEntries(pending.Pop()))
+                check();
+                string directory = pending.Pop();
+                if ((File.GetAttributes(PathPolicy.IOPath(directory)) & FileAttributes.ReparsePoint) != 0) throw new IOException("Thư mục đã đổi thành đường dẫn liên kết; chưa chạy lệnh.");
+                foreach (string ioEntry in Directory.EnumerateFileSystemEntries(PathPolicy.IOPath(directory)))
                 {
-                    token.ThrowIfCancellationRequested(); FileAttributes attributes = File.GetAttributes(entry);
+                    string entry = PathPolicy.DisplayPath(ioEntry);
+                    check(); FileAttributes attributes = File.GetAttributes(ioEntry);
+                    checkedEntries++;
+                    if (progress != null && (checkedEntries % 1000 == 0 || timer.ElapsedMilliseconds - lastReport >= 1000)) {
+                        lastReport = timer.ElapsedMilliseconds; progress(checkedEntries, directory);
+                    }
                     if ((attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Có đường dẫn liên kết bên trong đích; chưa chạy lệnh: " + entry);
                     if ((attributes & FileAttributes.Directory) != 0) pending.Push(entry);
                 }
             }
+            check();
+            if (progress != null) progress(checkedEntries, target);
         }
         private void ValidatePlan(CommandPlan plan)
         {
@@ -188,22 +221,46 @@ namespace CleanSystem
             if (fresh.DisplayCommand != plan.DisplayCommand || fresh.Executable != plan.Executable || fresh.Arguments != plan.Arguments) throw new IOException("Lệnh đã thay đổi sau khi chuẩn bị; hãy chọn lại.");
             if ((group.Id == "gradle-caches" || group.Id == "gradle-daemon") && javaActive()) throw new IOException("Java/Gradle đang chạy. Đóng IDE và dừng daemon trước khi chạy lệnh.");
             if (group.Id == "codex-data" && codexActive()) throw new IOException("Codex/ChatGPT đang chạy. Đóng ứng dụng đó rồi chạy lại Dọn dẹp ổ cứng để reset .codex.");
+            if (plan.Action == CommandAction.WindowsUpdateDownloads && !administrator()) throw new IOException("Mục Windows Update cần quyền quản trị. Đóng ứng dụng, nhấp phải DonDepOCung.exe và chọn Run as administrator. Chưa dừng dịch vụ hoặc xóa dữ liệu.");
         }
-        private static string BuildScript(CommandPlan plan)
+        internal static string BuildScript(CommandPlan plan, int validationTimeoutSeconds = 60)
         {
+            if (validationTimeoutSeconds < 0) throw new ArgumentOutOfRangeException("validationTimeoutSeconds");
             string root = Quote(plan.Root), target = Quote(plan.Target);
             // Process.StandardInput may emit a console encoding BOM. Detect it before reading the job/audit gate.
             string script = "$ErrorActionPreference = 'Stop'\n[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n" +
+                "[AppContext]::SetSwitch('Switch.System.IO.UseLegacyPathHandling', $false)\n[AppContext]::SetSwitch('Switch.System.IO.BlockLongPaths', $false)\n" +
                 "$cleanSystemGateReader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [Text.Encoding]::UTF8, $true)\n" +
                 "if ($cleanSystemGateReader.ReadLine() -ne 'RUN') { exit 64 }\ntry {\n" +
-                "$cleanSystemExpected = " + target + "\n" +
-                "if (-not [IO.Directory]::Exists($cleanSystemExpected)) { if ([IO.File]::Exists($cleanSystemExpected)) { throw 'Target is a file.' }; Write-Output 'Thu muc khong ton tai; khong xoa du lieu.'; exit 0 }\n" +
+                "function Get-CleanSystemIOPath([string]$path) {\n" +
+                "    if ($path.StartsWith('\\\\?\\')) { return $path }\n" +
+                "    if ($path.StartsWith('\\\\')) { return '\\\\?\\UNC\\' + $path.Substring(2) }\n" +
+                "    return '\\\\?\\' + $path\n}\n";
+            string validation = "$cleanSystemExpected = " + target + "\n" +
+                "if (-not [IO.Directory]::Exists($cleanSystemExpected)) { if ([IO.File]::Exists($cleanSystemExpected)) { throw 'Target is a file.' }; if ($RequireExists) { throw 'Thu muc dich da thay doi.' }; Write-Output 'Thu muc khong ton tai; khong xoa du lieu.'; exit 0 }\n" +
                 "$cleanSystemResolved = Get-Item -LiteralPath $cleanSystemExpected -Force -ErrorAction Stop\n" +
                 "if (-not $cleanSystemResolved.PSIsContainer -or $cleanSystemResolved.FullName -ne $cleanSystemExpected) { throw 'Target mismatch.' }\n" +
                 "$cleanSystemAncestor = $cleanSystemResolved\nwhile ($null -ne $cleanSystemAncestor) { if ($cleanSystemAncestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked ancestor.' }; $cleanSystemAncestor = $cleanSystemAncestor.Parent }\n" +
                 "$cleanSystemPending = New-Object 'System.Collections.Generic.Stack[string]'\n$cleanSystemPending.Push($cleanSystemExpected)\n" +
-                "while ($cleanSystemPending.Count -gt 0) { foreach ($cleanSystemEntry in [IO.Directory]::EnumerateFileSystemEntries($cleanSystemPending.Pop())) { $cleanSystemAttributes = [IO.File]::GetAttributes($cleanSystemEntry); if ($cleanSystemAttributes -band [IO.FileAttributes]::ReparsePoint) { throw ('Linked descendant: ' + $cleanSystemEntry) }; if ($cleanSystemAttributes -band [IO.FileAttributes]::Directory) { $cleanSystemPending.Push($cleanSystemEntry) } } }\n";
-            if (plan.Action == CommandAction.RemoveFolder) script += "Remove-Item -LiteralPath " + target + " -Recurse -Force -ErrorAction Stop\nWrite-Output 'Da xoa thu muc dich.'\nexit 0\n";
+                "$cleanSystemCheckTimer = [Diagnostics.Stopwatch]::StartNew()\n$cleanSystemChecked = 0\n$cleanSystemLastCheckReport = 0\n" +
+                "[Console]::WriteLine('Dang kiem tra lai duong dan: ' + $cleanSystemExpected)\n" +
+                "while ($cleanSystemPending.Count -gt 0) {\n" +
+                "    if ($cleanSystemCheckTimer.Elapsed.TotalSeconds -ge " + validationTimeoutSeconds + ") { throw 'Kiem tra duong dan qua thoi gian; da dung thao tac.' }\n" +
+                "    $cleanSystemDirectory = $cleanSystemPending.Pop()\n" +
+                "    if ([IO.File]::GetAttributes((Get-CleanSystemIOPath $cleanSystemDirectory)) -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked directory changed.' }\n" +
+                "    foreach ($cleanSystemEntry in [IO.Directory]::EnumerateFileSystemEntries((Get-CleanSystemIOPath $cleanSystemDirectory))) {\n" +
+                "        if ($cleanSystemCheckTimer.Elapsed.TotalSeconds -ge " + validationTimeoutSeconds + ") { throw 'Kiem tra duong dan qua thoi gian; da dung thao tac.' }\n" +
+                "        $cleanSystemChecked++\n" +
+                "        if ($cleanSystemChecked % 1000 -eq 0 -or $cleanSystemCheckTimer.ElapsedMilliseconds - $cleanSystemLastCheckReport -ge 1000) {\n" +
+                "            $cleanSystemLastCheckReport = $cleanSystemCheckTimer.ElapsedMilliseconds\n" +
+                "            [Console]::WriteLine('Kiem tra lai: ' + $cleanSystemChecked + ' muc; ' + $cleanSystemDirectory)\n        }\n" +
+                "        $cleanSystemAttributes = [IO.File]::GetAttributes($cleanSystemEntry)\n" +
+                "        if ($cleanSystemAttributes -band [IO.FileAttributes]::ReparsePoint) { throw ('Linked descendant: ' + $cleanSystemEntry) }\n" +
+                "        if ($cleanSystemAttributes -band [IO.FileAttributes]::Directory) { $cleanSystemPending.Push($cleanSystemEntry) }\n    }\n}\n" +
+                "[Console]::WriteLine('Da kiem tra lai ' + $cleanSystemChecked + ' muc.')\n";
+            script += "function Test-CleanSystemTree { param([switch]$RequireExists)\n" + validation + "}\nTest-CleanSystemTree\n";
+            if (plan.Action == CommandAction.WindowsUpdateDownloads) script += WindowsUpdateCache.BuildBody(plan.Target, "Test-CleanSystemTree -RequireExists\n");
+            else if (plan.Action == CommandAction.RemoveFolder) script += "Remove-Item -LiteralPath " + target + " -Recurse -Force -ErrorAction Stop\nWrite-Output 'Da xoa thu muc dich.'\nexit 0\n";
             else if (plan.Action == CommandAction.ClearContents) script += "Get-ChildItem -LiteralPath " + target + " -Force -ErrorAction Stop | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Output ('Da xoa: ' + $_.FullName) }\nexit 0\n";
             else
             {
@@ -215,7 +272,7 @@ namespace CleanSystem
             }
             return script + "} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }\n";
         }
-        public CommandResult Run(CommandPlan plan, string logDirectory, CancellationToken token, Action<string> progress)
+        public CommandResult Run(CommandPlan plan, string logDirectory, CancellationToken token, Action<string> progress, Action serviceBoundary = null)
         {
             var result = new CommandResult();
             var output = new StringBuilder(); object gate = new object(); Exception loggingError = null;
@@ -241,15 +298,24 @@ namespace CleanSystem
                     if (loggingError != null) throw loggingError;
                     lock (gate) file.Flush(true);
                     report("Đang kiểm tra đường dẫn và các liên kết trước khi chạy…");
-                    ValidateTree(plan.Target, token);
-                    ValidatePlan(plan); token.ThrowIfCancellationRequested();
+                    try {
+                        ValidateTree(plan.Target, token, (count, directory) => report("Kiểm tra: " + count.ToString("N0") + " mục · " + directory));
+                        ValidatePlan(plan); token.ThrowIfCancellationRequested();
+                    } catch (Exception e) {
+                        report("END precheck=" + (e is OperationCanceledException ? "canceled" : "failed") + "; started=False; " + e.Message);
+                        lock (gate) file.Flush(true);
+                        throw;
+                    }
+                    if (plan.Action == CommandAction.WindowsUpdateDownloads && serviceBoundary != null) serviceBoundary();
+                    token.ThrowIfCancellationRequested();
                     string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
                     var info = new ProcessStartInfo(powershell, "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(BuildScript(plan)))) {
                         UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
                         StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
                         WorkingDirectory = Path.GetDirectoryName(PathPolicy.Normalize(logDirectory))
                     };
-                    using (var job = new ProcessJob())
+                    bool recoveringServices = plan.Action == CommandAction.WindowsUpdateDownloads;
+                    using (var job = new ProcessJob(!recoveringServices))
                     using (var process = new Process { StartInfo = info })
                     {
                         process.Start();
@@ -263,12 +329,13 @@ namespace CleanSystem
                         {
                             report("START"); if (loggingError != null) { job.Stop(); throw loggingError; }
                             lock (gate) file.Flush(true);
+                            result.Started = true;
                             process.StandardInput.WriteLine("RUN"); process.StandardInput.Flush(); process.StandardInput.Close();
                         }
                         var timer = Stopwatch.StartNew();
                         while (!process.WaitForExit(100))
                         {
-                            if (token.IsCancellationRequested || loggingError != null || timer.Elapsed > TimeSpan.FromMinutes(30))
+                            if (!recoveringServices && (token.IsCancellationRequested || loggingError != null || timer.Elapsed > TimeSpan.FromMinutes(30)))
                             {
                                 result.Canceled = token.IsCancellationRequested;
                                 if (!result.Canceled && loggingError == null) result.Error = "Lệnh vượt quá thời gian 30 phút; đã dừng cây tiến trình.";
@@ -278,7 +345,7 @@ namespace CleanSystem
                         process.WaitForExit(); result.ExitCode = process.ExitCode;
                         // Prevent a detached child from continuing cleanup after its launcher exits.
                         job.Stop(); Task.WaitAll(stdout, stderr);
-                        if (loggingError != null) throw new IOException("Không ghi được nhật ký; đã dừng lệnh.", loggingError);
+                        if (loggingError != null) throw new IOException(recoveringServices ? "Không ghi được nhật ký; đã chờ lệnh kết thúc bước khởi động lại dịch vụ." : "Không ghi được nhật ký; đã dừng lệnh.", loggingError);
                         if (!result.Canceled && result.ExitCode != 0 && result.Error == null) result.Error = "Lệnh kết thúc với mã lỗi " + result.ExitCode + ". Xem đầu ra và nhật ký.";
                         report("END exit=" + result.ExitCode + "; canceled=" + result.Canceled);
                         if (loggingError != null) throw loggingError;
@@ -323,11 +390,11 @@ namespace CleanSystem
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool TerminateJobObject(IntPtr job, uint code);
         [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
         private IntPtr handle;
-        public ProcessJob()
+        public ProcessJob(bool killOnClose = true)
         {
             handle = CreateJobObject(IntPtr.Zero, null);
             if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-            var limits = new ExtendedLimits(); limits.Basic.LimitFlags = 0x2000; // KILL_ON_JOB_CLOSE
+            var limits = new ExtendedLimits(); limits.Basic.LimitFlags = killOnClose ? 0x2000u : 0u; // KILL_ON_JOB_CLOSE; service recovery must finish if the UI exits.
             if (!SetInformationJobObject(handle, 9, ref limits, (uint)Marshal.SizeOf(limits))) { int error = Marshal.GetLastWin32Error(); Dispose(); throw new Win32Exception(error); }
         }
         public void Attach(Process process) { if (!AssignProcessToJobObject(handle, process.Handle)) throw new Win32Exception(Marshal.GetLastWin32Error()); }

@@ -93,7 +93,11 @@
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="0.85*" /></Grid.ColumnDefinitions>
         <Border Background="White" CornerRadius="12" Padding="22" BorderBrush="#E4E8ED" BorderThickness="1">
           <StackPanel>
-            <TextBlock Text="DUNG LƯỢNG TRỐNG · C:" FontSize="11" Foreground="{StaticResource Muted}" FontWeight="SemiBold" />
+            <DockPanel LastChildFill="True">
+              <Button x:Name="DiskRefreshButton" Content="Làm mới" DockPanel.Dock="Right" FontSize="11" Padding="10,6" Margin="10,0,0,0"
+                      ToolTip="Cập nhật dung lượng trống và đã dùng của ổ C" />
+              <TextBlock Text="DUNG LƯỢNG TRỐNG · C:" FontSize="11" Foreground="{StaticResource Muted}" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
             <TextBlock x:Name="FreeText" Text="Đang đọc…" FontSize="30" FontWeight="SemiBold" Margin="0,8,0,8" />
             <ProgressBar x:Name="DiskBar" Height="7" Maximum="100" BorderThickness="0" Background="#EEF1F5" Foreground="#538FD0" />
             <TextBlock x:Name="DiskText" Text="Dung lượng ổ đĩa" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,10,0,0" />
