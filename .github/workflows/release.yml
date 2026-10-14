@@ -1,0 +1,69 @@
+name: Build and publish Windows release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Build, test and verify the Windows UI
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1 -Test
+          if ($LASTEXITCODE -ne 0) { throw 'Build or tests failed.' }
+
+      - name: Verify release metadata and prepare notes
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'Use a version tag such as v1.0.0.' }
+          $binary = Get-Item -LiteralPath '.\dist\DonDepOCung.exe'
+          if ('v' + $binary.VersionInfo.ProductVersion -ne $tag) { throw 'Tag does not match EXE version.' }
+          if ($binary.VersionInfo.LegalCopyright -ne 'by Until You') { throw 'Author credit is missing.' }
+          $hash = (Get-FileHash -LiteralPath $binary.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $notes = Get-Content -LiteralPath ('.\releases\' + $tag + '.md') -Raw -Encoding UTF8
+          $notes += "`n`nSHA-256 (DonDepOCung.exe): " + $hash + "`n"
+          [IO.File]::WriteAllText((Join-Path $PWD 'dist\release-notes.md'), $notes, [Text.UTF8Encoding]::new($false))
+          "RELEASE_SHA256=$hash" >> $env:GITHUB_ENV
+
+      - name: Upload EXE, verify it and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $repo = $env:GITHUB_REPOSITORY
+          gh release create $tag '.\dist\DonDepOCung.exe' --repo $repo --verify-tag --draft --title "Dọn dẹp ổ cứng $tag - by Until You" --notes-file '.\dist\release-notes.md'
+          if ($LASTEXITCODE -ne 0) { throw 'Creating release or uploading EXE failed.' }
+          $releaseId = gh release view $tag --repo $repo --json databaseId --jq '.databaseId'
+          if ($LASTEXITCODE -ne 0 -or -not $releaseId) { throw 'Could not locate the draft release.' }
+          $releaseJson = gh api "repos/$repo/releases/$releaseId"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify the uploaded release.' }
+          $release = $releaseJson | ConvertFrom-Json
+          $assets = @($release.assets | Where-Object { $_.name -eq 'DonDepOCung.exe' })
+          $expectedSize = (Get-Item -LiteralPath '.\dist\DonDepOCung.exe').Length
+          if ($assets.Count -ne 1 -or $assets[0].state -ne 'uploaded' -or $assets[0].size -ne $expectedSize -or $assets[0].digest -ne ('sha256:' + $env:RELEASE_SHA256)) {
+            throw 'EXE checksum or size verification failed; release remains a draft.'
+          }
+          gh release edit $tag --repo $repo --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing release failed.' }
+          "Release: https://github.com/$repo/releases/tag/$tag" >> $env:GITHUB_STEP_SUMMARY
+          "Download: https://github.com/$repo/releases/download/$tag/DonDepOCung.exe" >> $env:GITHUB_STEP_SUMMARY

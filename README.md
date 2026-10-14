@@ -6,7 +6,7 @@
 
 ## Chạy ứng dụng
 
-Yêu cầu Windows 10/11 và .NET Framework 4.8. Mở `dist\DonDepOCung.exe` sau khi build.
+Yêu cầu Windows 10/11 và .NET Framework 4.8. Tải `DonDepOCung.exe` tại [GitHub Releases](https://github.com/ManhPhan0812/clean_system/releases/latest) và mở trực tiếp, hoặc mở `dist\DonDepOCung.exe` sau khi build.
 
 1. Chọn thời gian giữ file mới: 1, 7, 14 hoặc 30 ngày (mặc định 7 ngày).
 2. Bấm **Quét ổ C**. Quét chỉ đọc thông tin, chưa xóa dữ liệu.
@@ -88,6 +88,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1 -Test
 Script dùng trình biên dịch .NET Framework có sẵn trong Windows. Đầu ra: `dist\DonDepOCung.exe`. XAML nhúng trong `.exe`, không cần mang theo thư mục `src`.
 
 Bản phát hành hiện tại là **v1.0.0**, tác giả **by Until You**, tại `dist\DonDepOCung.exe`. Thư mục `dist` không được đưa vào Git. Nếu `.exe` đang chạy, đóng ứng dụng trước khi build lại vào cùng đường dẫn.
+
+GitHub Actions build và chạy kiểm thử trên Windows khi push tag phiên bản (ví dụ `v1.0.0`). Phiên bản trong EXE phải khớp tag và có nội dung phát hành tại `releases\<tag>.md`. Workflow tải EXE lên bản nháp, kiểm tra dung lượng và SHA-256 trên GitHub rồi mới công khai release. EXE được tải qua Releases; mã nguồn giữ riêng trong repository.
 
 Kiểm thử tạo fixture riêng trong `test-output`, không dọn thư mục tạm/cache thật. Kiểm tra việc quét chỉ đọc, tuổi file, nhận dạng file thay đổi/thay thế, file đang mở, giới hạn đường dẫn, file chỉ đọc, hard link, junction, hủy thao tác, lỗi nhật ký, thống kê file mới/chỉ đọc, tách hai màn hình, chặn xóa mục chỉ thống kê qua nút dọn file, chính sách Gradle, trạng thái Java thay đổi sau khi quét, quét đúng một thư mục, chặn ID ngoài phạm vi, giữ/thay kết quả khi quét lần lượt và hủy quét riêng. Bộ kiểm thử lệnh xác minh xóa fixture đúng đích, giữ thư mục gốc, file hidden, đường dẫn có dấu nháy/khoảng trắng, chặn junction, audit, CLI giả trả lỗi và hủy cả tiến trình con. Giữ fixture để kiểm tra lại; `test-output` không được commit. Smoke test render ba màn hình và popup Có/Không cho các nhóm lệnh, file tạm, Thùng rác; kiểm tra mặc định Không, kết quả của nút Có/Không và không có ô nhập hay checkbox xác nhận. Không chạy thao tác xóa từ các popup kiểm thử.
 
