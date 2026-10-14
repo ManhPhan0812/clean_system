@@ -1,0 +1,228 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Dọn dẹp ổ cứng" Width="1300" Height="900" MinWidth="1120" MinHeight="800"
+        WindowStartupLocation="CenterScreen" Background="#F5F6F8" FontFamily="Segoe UI" FontSize="14"
+        Foreground="#182233">
+  <Window.Resources>
+    <SolidColorBrush x:Key="Muted" Color="#657084" />
+    <Style TargetType="Button">
+      <Setter Property="Background" Value="#FFFFFF" /><Setter Property="Foreground" Value="#24334A" />
+      <Setter Property="Padding" Value="18,11" /><Setter Property="Cursor" Value="Hand" />
+      <Setter Property="BorderBrush" Value="#DFE4EA" /><Setter Property="BorderThickness" Value="1" />
+      <Setter Property="FontWeight" Value="SemiBold" /><Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="8"
+                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" /></Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.82" /></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.4" /><Setter Property="Cursor" Value="Arrow" /></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="Nav" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="#B4C0D4" /><Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Margin" Value="0,4" /><Setter Property="Padding" Value="16,14" />
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="Background" Value="White" /><Setter Property="BorderThickness" Value="0" />
+      <Setter Property="RowBackground" Value="White" /><Setter Property="AlternatingRowBackground" Value="#FAFBFD" />
+      <Setter Property="HorizontalGridLinesBrush" Value="#EEF1F5" /><Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="HeadersVisibility" Value="Column" /><Setter Property="CanUserAddRows" Value="False" />
+      <Setter Property="CanUserDeleteRows" Value="False" /><Setter Property="CanUserResizeRows" Value="False" />
+      <Setter Property="AutoGenerateColumns" Value="False" /><Setter Property="SelectionMode" Value="Single" />
+      <Setter Property="RowHeaderWidth" Value="0" />
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+      <Setter Property="Background" Value="#F8FAFC" /><Setter Property="Foreground" Value="#657084" />
+      <Setter Property="FontSize" Value="12" /><Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="12,12" /><Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="BorderBrush" Value="#E9EDF2" />
+    </Style>
+    <Style TargetType="DataGridCell">
+      <Setter Property="BorderThickness" Value="0" /><Setter Property="Padding" Value="8" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#E9F2FF" /><Setter Property="Foreground" Value="#182233" /></Trigger></Style.Triggers>
+    </Style>
+  </Window.Resources>
+  <Grid Background="#F5F6F8">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="212" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Border Background="#142137">
+      <Grid Margin="20,32,20,24">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <StackPanel>
+          <Border Background="#F5A56A" CornerRadius="12" Width="44" Height="44" HorizontalAlignment="Left">
+            <TextBlock Text="C" Foreground="#142137" FontWeight="Bold" FontSize="26" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="Dọn dẹp ổ cứng" FontSize="20" FontWeight="SemiBold" Foreground="White" Margin="0,16,0,4" TextWrapping="Wrap" />
+          <TextBlock Text="KHÔNG GIAN CHO ĐIỀU MỚI" FontSize="9" Foreground="#8B9CB7" />
+          <StackPanel Margin="0,42,0,0">
+            <Button x:Name="HomeButton" Content="Dọn file tạm" Style="{StaticResource Nav}" Background="#293951" Foreground="White" />
+            <Button x:Name="DeveloperButton" Content="Other / lập trình" Style="{StaticResource Nav}" />
+            <Button x:Name="RecycleNavButton" Content="Thùng rác" Style="{StaticResource Nav}" />
+            <Button x:Name="StorageButton" Content="Lưu trữ Windows  ↗" Style="{StaticResource Nav}" />
+            <Button x:Name="LogButton" Content="Nhật ký dọn dẹp  ↗" Style="{StaticResource Nav}" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Row="2">
+          <Border Background="#203149" CornerRadius="10" Padding="14">
+            <StackPanel><TextBlock Text="Bạn quyết định xóa gì." Foreground="#E4ECF8" FontWeight="SemiBold" FontSize="12" />
+              <TextBlock Text="Quét trước, xem lại rồi dọn.&#10;Không tự chạy nền." Foreground="#A9B8CC" FontSize="12" Margin="0,8,0,0" LineHeight="20" /></StackPanel>
+          </Border>
+          <TextBlock Text="v1.0.0  ·  Windows desktop" Foreground="#8293AD" FontSize="11" Margin="4,18,0,0" />
+          <TextBlock Text="by Until You" Foreground="#B4C0D4" FontSize="12" FontStyle="Italic" Margin="4,7,0,0" />
+        </StackPanel>
+      </Grid>
+    </Border>
+    <Grid x:Name="CleanupPage" Grid.Column="1" Margin="32,28,32,24">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+        <RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+      <Grid>
+        <StackPanel><TextBlock x:Name="PageLabel" Text="DỌN DẸP  /  Ổ C" FontSize="11" FontWeight="SemiBold" Foreground="#68748A" />
+          <TextBlock x:Name="PageTitle" Text="Thêm chỗ trống. Bớt file tạm." FontSize="28" FontWeight="SemiBold" Margin="0,8,0,7" />
+          <TextBlock x:Name="PageSubtitle" Text="Xem dung lượng có thể dọn trước khi quyết định xóa." Foreground="{StaticResource Muted}" />
+        </StackPanel>
+        <Border Background="#E8F3EC" CornerRadius="15" Padding="12,6" HorizontalAlignment="Right" VerticalAlignment="Top">
+          <TextBlock Text="●  Dọn có kiểm tra" Foreground="#2D714D" FontSize="11" FontWeight="SemiBold" />
+        </Border>
+      </Grid>
+      <Grid Grid.Row="1" Margin="0,24,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="0.85*" /></Grid.ColumnDefinitions>
+        <Border Background="White" CornerRadius="12" Padding="22" BorderBrush="#E4E8ED" BorderThickness="1">
+          <StackPanel>
+            <TextBlock Text="DUNG LƯỢNG TRỐNG · C:" FontSize="11" Foreground="{StaticResource Muted}" FontWeight="SemiBold" />
+            <TextBlock x:Name="FreeText" Text="Đang đọc…" FontSize="30" FontWeight="SemiBold" Margin="0,8,0,8" />
+            <ProgressBar x:Name="DiskBar" Height="7" Maximum="100" BorderThickness="0" Background="#EEF1F5" Foreground="#538FD0" />
+            <TextBlock x:Name="DiskText" Text="Dung lượng ổ đĩa" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,10,0,0" />
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Background="#FFF2E8" CornerRadius="12" Padding="22" BorderBrush="#F1DCCB" BorderThickness="1">
+          <StackPanel>
+            <TextBlock Text="DUNG LƯỢNG ĐANG CHỌN" FontSize="11" Foreground="#88674F" FontWeight="SemiBold" />
+            <TextBlock x:Name="SelectedText" Text="—" FontSize="30" FontWeight="SemiBold" Margin="0,8,0,8" />
+            <TextBlock x:Name="SelectedCountText" Text="Quét để tìm file tạm cũ" Foreground="#88674F" FontSize="12" />
+            <TextBlock x:Name="EstimateText" Text="Ước tính theo kích thước file" Foreground="#88674F" FontSize="11" Margin="0,10,0,0" />
+          </StackPanel>
+        </Border>
+      </Grid>
+      <Grid Grid.Row="2" Margin="0,24,0,14">
+        <StackPanel><TextBlock x:Name="ListTitle" Text="Chọn nhóm cần dọn" FontSize="18" FontWeight="SemiBold" />
+          <TextBlock x:Name="ListSubtitle" Text="File tạm được chọn sẵn. Báo cáo lỗi là tùy chọn." FontSize="12" Foreground="{StaticResource Muted}" Margin="0,5,0,0" /></StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <TextBlock Text="Giữ file mới hơn" VerticalAlignment="Center" FontSize="12" Margin="0,0,10,0" Foreground="{StaticResource Muted}" />
+          <ComboBox x:Name="AgeBox" Width="96" Padding="8,6" SelectedIndex="1">
+            <ComboBoxItem Content="1 ngày" Tag="1" /><ComboBoxItem Content="7 ngày" Tag="7" />
+            <ComboBoxItem Content="14 ngày" Tag="14" /><ComboBoxItem Content="30 ngày" Tag="30" />
+          </ComboBox>
+        </StackPanel>
+      </Grid>
+      <Border Grid.Row="3" Background="White" CornerRadius="10" BorderBrush="#E4E8ED" BorderThickness="1" ClipToBounds="True">
+        <DataGrid x:Name="GroupsGrid" CanUserSortColumns="False">
+          <DataGrid.Columns>
+            <DataGridTemplateColumn Width="42">
+              <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanClean}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8" />
+              </DataTemplate></DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTemplateColumn Header="NHÓM DỮ LIỆU" Width="*" IsReadOnly="True">
+              <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                <StackPanel Margin="10,11" ToolTip="{Binding Root}">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" />
+                  <TextBlock Text="{Binding Description}" FontSize="10" Foreground="#657084" Margin="0,5,0,0" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding State}" FontSize="10" Foreground="#657084" Margin="0,4,0,0" />
+                </StackPanel>
+              </DataTemplate></DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn Header="TỔNG" Binding="{Binding TotalSizeText}" Width="110" IsReadOnly="True" />
+            <DataGridTextColumn Header="CÓ THỂ DỌN" Binding="{Binding SizeText}" Width="105" IsReadOnly="True" />
+            <DataGridTemplateColumn x:Name="FolderScanColumn" Header="QUÉT RIÊNG" Width="146" IsReadOnly="True">
+              <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                <Button Content="Quét thư mục này" Tag="scan-group" ToolTip="{Binding Root}" FontSize="11" Padding="9,8" Margin="6" VerticalAlignment="Center">
+                  <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding IsDeveloper}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                  </Style></Button.Style>
+                </Button>
+              </DataTemplate></DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTemplateColumn x:Name="RunCommandColumn" Header="THAO TÁC" Width="145" IsReadOnly="True">
+              <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                <Button Content="{Binding RunButtonText}" Tag="run-group" IsEnabled="{Binding CanRunCommand}" FontSize="11" Padding="9,8" Margin="6" VerticalAlignment="Center" Background="#FFF0E4" BorderBrush="#EBCDB5" ToolTip="Chạy lệnh cho mục này sau khi xác nhận">
+                  <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding IsDeveloper}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                  </Style></Button.Style>
+                </Button>
+              </DataTemplate></DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </DataGrid.Columns>
+        </DataGrid>
+      </Border>
+      <Border Grid.Row="4" Background="#ECF1F7" CornerRadius="8" Padding="14,11" Margin="0,14,0,0">
+        <TextBlock x:Name="SafetyText" FontSize="12" Foreground="#53657D" TextWrapping="Wrap" LineHeight="19"
+          Text="Chỉ dọn các thư mục tạm cho phép trên ổ C. Bỏ qua file đang dùng và đường dẫn liên kết. Không đụng tới Downloads, tài liệu, Registry hay file hệ thống." />
+      </Border>
+      <Grid Grid.Row="5" Margin="0,17,0,0">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <TextBlock x:Name="StatusText" Text="Sẵn sàng. Bấm Quét ổ C để bắt đầu." TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,0,0,12" />
+        <Grid Grid.Row="1">
+          <StackPanel Orientation="Horizontal">
+            <Button x:Name="ScanButton" Content="Quét ổ C" Background="#E9EFF7" BorderBrush="#D8E2EF" />
+            <Button x:Name="PreviewButton" Content="Xem danh sách" Margin="10,0,0,0" IsEnabled="False" />
+            <Button x:Name="GuideButton" Content="Cách dọn" Margin="10,0,0,0" />
+            <Button x:Name="CancelButton" Content="Dừng" Margin="10,0,0,0" Visibility="Collapsed" />
+          </StackPanel>
+          <Button x:Name="CleanButton" Content="Dọn mục đã chọn  →" HorizontalAlignment="Right" Background="#DA7535" Foreground="White" BorderThickness="0" IsEnabled="False" />
+        </Grid>
+      </Grid>
+    </Grid>
+    <Grid x:Name="RecyclePage" Grid.Column="1" Margin="32,28,32,24" Visibility="Collapsed">
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+      <StackPanel>
+        <TextBlock Text="THÙNG RÁC  /  TẤT CẢ Ổ ĐĨA" FontSize="11" FontWeight="SemiBold" Foreground="#68748A" />
+        <TextBlock Text="Kiểm tra trước. Dọn sau." FontSize="28" FontWeight="SemiBold" Margin="0,8,0,7" />
+        <TextBlock Text="Dọn Thùng rác trên tất cả ổ đĩa của tài khoản Windows hiện tại." Foreground="{StaticResource Muted}" />
+      </StackPanel>
+      <Grid Grid.Row="1" Margin="0,24,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+        <Border Background="White" CornerRadius="12" Padding="24" BorderBrush="#E4E8ED" BorderThickness="1">
+          <StackPanel>
+            <TextBlock Text="DUNG LƯỢNG TRONG THÙNG RÁC" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Muted}" />
+            <TextBlock x:Name="RecycleSizeText" Text="—" FontSize="34" FontWeight="SemiBold" Margin="0,12,0,10" />
+            <TextBlock Text="Kích thước dữ liệu Windows báo cáo" FontSize="12" Foreground="{StaticResource Muted}" />
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Background="#FFF2E8" CornerRadius="12" Padding="24" BorderBrush="#F1DCCB" BorderThickness="1">
+          <StackPanel>
+            <TextBlock Text="SỐ MỤC HIỆN CÓ · TẤT CẢ Ổ ĐĨA" FontSize="11" FontWeight="SemiBold" Foreground="#88674F" />
+            <TextBlock x:Name="RecycleCountText" Text="—" FontSize="34" FontWeight="SemiBold" Margin="0,12,0,10" />
+            <TextBlock Text="Có thể gồm cả file và thư mục" FontSize="12" Foreground="#88674F" />
+          </StackPanel>
+        </Border>
+      </Grid>
+      <StackPanel Grid.Row="2" Margin="0,26,0,0">
+        <Border Background="White" CornerRadius="12" Padding="24" BorderBrush="#E4E8ED" BorderThickness="1">
+          <StackPanel>
+            <TextBlock Text="Xem lại những gì bạn đã xóa" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="Mở Thùng rác của Windows để xem và khôi phục các mục cần giữ trước khi dọn. Ứng dụng hiển thị tổng số mục và dung lượng Thùng rác trên tất cả ổ đĩa." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,12,0,18" LineHeight="23" />
+            <Button x:Name="RecycleOpenButton" Content="Mở Thùng rác Windows  ↗" HorizontalAlignment="Left" />
+          </StackPanel>
+        </Border>
+        <Border Background="#ECF1F7" CornerRadius="8" Padding="18,14" Margin="0,18,0,0">
+          <TextBlock Text="Dọn Thùng rác sẽ xóa vĩnh viễn toàn bộ các mục hiện có trên tất cả ổ đĩa. Không áp dụng ngưỡng tuổi file. Kiểm tra và khôi phục dữ liệu cần giữ trước khi xác nhận." TextWrapping="Wrap" Foreground="#53657D" LineHeight="23" />
+        </Border>
+      </StackPanel>
+      <StackPanel Grid.Row="3" Margin="0,20,0,0">
+        <ProgressBar x:Name="RecycleProgress" Height="6" IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,0,12" />
+        <TextBlock x:Name="RecycleStatusText" Text="Bấm Làm mới để đọc dung lượng Thùng rác." TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,0,0,12" />
+        <Grid>
+          <Button x:Name="RecycleRefreshButton" Content="Làm mới" HorizontalAlignment="Left" Background="#E9EFF7" BorderBrush="#D8E2EF" />
+          <Button x:Name="RecycleEmptyButton" Content="Dọn thùng rác  →" HorizontalAlignment="Right" Background="#DA7535" Foreground="White" BorderThickness="0" IsEnabled="False" />
+        </Grid>
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>
