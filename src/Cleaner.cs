@@ -24,14 +24,55 @@ namespace CleanSystem
         public bool Selected { get; set; }
         public bool IsDeveloper { get; private set; }
         public CleanupRule Rule { get; private set; }
-        public bool CanClean { get { return Rule != CleanupRule.InspectOnly; } }
+        public bool CanClean { get { return Rule != CleanupRule.InspectOnly && BlockedReason == null; } }
         public string Guidance { get; private set; }
         public string Commands { get; private set; }
         public string DocumentationUrl { get; private set; }
-        public bool CanRunCommand { get { return IsDeveloper && CommandRunner.ActionFor(Id) != CommandAction.None; } }
+        // A root resolved from the environment can fall outside C: keep the row visible but never measure or delete it.
+        public string BlockedReason { get; internal set; }
+        public bool Present { get; internal set; }
+        public bool ToolPresent { get; internal set; }
+        public string RequiredTool { get { return CommandRunner.ToolFor(Id); } }
+        // Visible list filter: a row is relevant when its folder exists or the tool that would create it is installed.
+        public bool Applicable { get { return Present || (RequiredTool != null && ToolPresent); } }
+        public bool CanRunCommand { get { return IsDeveloper && BlockedReason == null && CommandRunner.ActionFor(Id) != CommandAction.None && ToolPresent; } }
         public string RunButtonText { get { return CommandRunner.ButtonText(Id); } }
+        public string RunHint
+        {
+            get
+            {
+                if (BlockedReason != null) return BlockedReason;
+                string tool = RequiredTool;
+                if (tool != null && !ToolPresent) return "Cần cài " + tool + " và có trong PATH để chạy lệnh này.";
+                return "Chạy lệnh cho mục này sau khi xác nhận";
+            }
+        }
+        public string AvailabilityText
+        {
+            get
+            {
+                if (BlockedReason != null) return BlockedReason;
+                string tool = RequiredTool;
+                if (Present) return tool != null && !ToolPresent ? "Có dữ liệu · cần " + tool + " trong PATH" : "";
+                if (tool == null) return "Chưa có thư mục trên máy này";
+                return ToolPresent ? "Chưa có dữ liệu · công cụ đã cài" : "Chưa cài công cụ · chưa có thư mục";
+            }
+        }
+        internal void DetectEnvironment()
+        {
+            string tool = RequiredTool;
+            Present = Directory.Exists(Root);
+            ToolPresent = tool == null || ToolPresence.Has(tool);
+        }
+        internal void Block(string reason)
+        {
+            BlockedReason = reason; Selected = false;
+        }
         public long TotalBytes { get; internal set; }
         public int TotalCount { get; internal set; }
+        public int AgeSkippedCount { get; internal set; }
+        public long AgeSkippedBytes { get; internal set; }
+        public string AgeSkippedText { get { return AgeSkippedCount == 0 ? "" : "Giữ do tuổi file: " + AgeSkippedCount.ToString("N0") + " file (" + Format.Bytes(AgeSkippedBytes) + ")"; } }
         public bool Measured { get; internal set; }
         public bool Partial { get; internal set; }
         public string TotalSizeText { get { return Measured ? (Partial ? "≥ " : "") + Format.Bytes(TotalBytes) : "—"; } }
@@ -160,6 +201,30 @@ namespace CleanSystem
         }
     }
 
+    internal static class RootResolution
+    {
+        // Tools document their own cache variable; a set variable wins over the default path so the row
+        // measures (and pins commands to) the cache the tool really uses. Invalid values keep the default.
+        internal static string Resolve(string fallback, params string[] variables)
+        {
+            foreach (string variable in variables)
+            {
+                string value;
+                try { value = Environment.GetEnvironmentVariable(variable); }
+                catch (Exception) { continue; }
+                if (String.IsNullOrWhiteSpace(value)) continue;
+                try
+                {
+                    value = Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'));
+                    if (!System.IO.Path.IsPathRooted(value)) continue;
+                    return PathPolicy.Normalize(value);
+                }
+                catch (Exception) { }
+            }
+            return fallback;
+        }
+    }
+
     internal sealed class Cleaner
     {
         private readonly List<CleanupGroup> definitions;
@@ -169,17 +234,35 @@ namespace CleanSystem
         private const int ScanLimit = 100000;
 
         // Production roots cannot be supplied by the UI or command-line arguments.
-        public Cleaner(Func<bool> adminActivityProbe = null) : this(DefaultGroups(), null, adminActivityProbe) { }
-        internal Cleaner(IEnumerable<CleanupGroup> groups, Func<bool> javaActivityProbe = null, Func<bool> adminActivityProbe = null)
+        public Cleaner(Func<bool> adminActivityProbe = null) : this(DefaultGroups(), null, adminActivityProbe, true) { }
+        internal Cleaner(IEnumerable<CleanupGroup> groups, Func<bool> javaActivityProbe = null, Func<bool> adminActivityProbe = null, bool requireCDrive = false)
         {
             definitions = groups.ToList();
-            allowedRoots = new HashSet<string>(definitions.Select(g => g.Root), StringComparer.OrdinalIgnoreCase);
+            foreach (var group in definitions)
+            {
+                if (requireCDrive && !PathPolicy.IsOnC(group.Root)) group.Block("Ngoài ổ C · chỉ hiển thị, không quét");
+                group.DetectEnvironment();
+            }
+            // Cleanup never receives a root from the UI: only reviewed, cleanable C roots can be deleted.
+            allowedRoots = new HashSet<string>(definitions
+                .Where(g => g.CanClean && (!requireCDrive || PathPolicy.IsOnC(g.Root))).Select(g => g.Root), StringComparer.OrdinalIgnoreCase);
             javaIsActive = javaActivityProbe ?? JavaMayBeActive;
             administrator = adminActivityProbe ?? WindowsUpdateCache.IsAdministrator;
         }
+        // Re-detect presence after the user installs a tool or creates a cache folder, without restarting.
+        public void RefreshEnvironment()
+        {
+            ToolPresence.Reset();
+            foreach (var group in definitions) group.DetectEnvironment();
+        }
         public List<CleanupGroup> NewGroups()
         {
-            return definitions.Select(g => new CleanupGroup(g.Id, g.Name, g.Description, g.Root, g.IsDeveloper, g.Rule, g.Guidance, g.Commands, g.DocumentationUrl)).ToList();
+            return definitions.Select(g =>
+            {
+                var copy = new CleanupGroup(g.Id, g.Name, g.Description, g.Root, g.IsDeveloper, g.Rule, g.Guidance, g.Commands, g.DocumentationUrl);
+                copy.BlockedReason = g.BlockedReason; copy.Present = g.Present; copy.ToolPresent = g.ToolPresent;
+                return copy;
+            }).ToList();
         }
         private static List<CleanupGroup> DefaultGroups()
         {
@@ -188,14 +271,16 @@ namespace CleanSystem
             string common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             var groups = new List<CleanupGroup> {
                 new CleanupGroup("user-temp", "File tạm của bạn", "Dữ liệu tạm trong AppData · không gồm Downloads", Path.Combine(local, "Temp")),
-                new CleanupGroup("windows-temp", "File tạm Windows", "Bỏ qua file không có quyền truy cập", Path.Combine(windows, "Temp")),
+                new CleanupGroup("windows-temp", "File tạm Windows", "Cấp quyền quản trị để quét và dọn các mục hạn chế", Path.Combine(windows, "Temp")),
                 new CleanupGroup("user-wer-archive", "Báo cáo lỗi đã lưu", "Báo cáo chẩn đoán cũ của tài khoản hiện tại", Path.Combine(local, @"Microsoft\Windows\WER\ReportArchive")),
                 new CleanupGroup("user-wer-queue", "Báo cáo lỗi đang chờ", "Có thể mất báo cáo chưa gửi · tùy chọn", Path.Combine(local, @"Microsoft\Windows\WER\ReportQueue")),
                 new CleanupGroup("system-wer-archive", "Báo cáo lỗi hệ thống", "Báo cáo chẩn đoán cũ trong ProgramData", Path.Combine(common, @"Microsoft\Windows\WER\ReportArchive")),
                 new CleanupGroup("system-wer-queue", "Báo cáo hệ thống đang chờ", "Có thể mất báo cáo chưa gửi · tùy chọn", Path.Combine(common, @"Microsoft\Windows\WER\ReportQueue"))
             };
             groups.AddRange(DeveloperGroups());
-            groups.RemoveAll(g => !PathPolicy.IsOnC(g.Root));
+            // System temp/report roots are only in scope on C:. A developer root that resolves to another
+            // drive stays visible (blocked) instead of disappearing, so a custom cache is explained, not hidden.
+            groups.RemoveAll(g => !g.IsDeveloper && !PathPolicy.IsOnC(g.Root));
             return groups;
         }
 
@@ -203,7 +288,12 @@ namespace CleanSystem
         {
             string user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string gradle = Path.Combine(user, ".gradle");
+            string gradle = RootResolution.Resolve(Path.Combine(user, ".gradle"), "GRADLE_USER_HOME");
+            string goModules = RootResolution.Resolve(Path.Combine(user, @"go\pkg\mod"), "GOMODCACHE");
+            string goBuild = RootResolution.Resolve(Path.Combine(local, "go-build"), "GOCACHE");
+            string pubCache = RootResolution.Resolve(Path.Combine(local, @"Pub\Cache"), "PUB_CACHE");
+            string fvm = RootResolution.Resolve(Path.Combine(user, "fvm"), "FVM_CACHE_PATH");
+            string codex = RootResolution.Resolve(Path.Combine(user, ".codex"), "CODEX_HOME");
             const string gradleDoc = "https://docs.gradle.org/current/userguide/directory_layout.html";
             return new[] {
                 new CleanupGroup(WindowsUpdateCache.GroupId, "Windows Update · Download", "Cache cập nhật đã tải · cần quyền quản trị", WindowsUpdateCache.Root, true, CleanupRule.InspectOnly,
@@ -214,24 +304,24 @@ namespace CleanSystem
                 new CleanupGroup("gradle-daemon", "Gradle · daemon logs", "Chỉ dọn daemon-*.out.log; giữ registry.bin", Path.Combine(gradle, "daemon"), true, CleanupRule.GradleLogs,
                     "Dừng Gradle daemon của các phiên bản đang dùng và đóng IDE trước khi dọn; có thể dùng .\\gradlew.bat --stop trong từng dự án. Nút dọn trong ứng dụng chỉ xóa log cũ, giữ registry.bin và lock. Lệnh PowerShell bên dưới xóa toàn bộ thư mục daemon, gồm log, registry và lock, không áp dụng ngưỡng tuổi file. Gradle tạo lại dữ liệu daemon khi chạy tiếp. Không tự dừng tiến trình; kiểm tra đường dẫn và chắc rằng build/daemon đã dừng trước khi chạy lệnh.",
                     "# PowerShell: dừng daemon trong dự án Gradle trước khi xóa\n# .\\gradlew.bat --stop\n" + FolderResetCommand(Path.Combine(gradle, "daemon")), gradleDoc),
-                new CleanupGroup("go-modules", "Go · module cache", "Dùng go clean -modcache · không gồm mã nguồn go/src", Path.Combine(user, @"go\pkg\mod"), true, CleanupRule.InspectOnly,
+                new CleanupGroup("go-modules", "Go · module cache", "Dùng go clean -modcache · không gồm mã nguồn go/src", goModules, true, CleanupRule.InspectOnly,
                     "Đây là module cache ở vị trí mặc định, không phải toàn bộ thư mục go. File module thường chỉ đọc. Đóng build Go trước khi chạy. Nút Chạy lệnh dùng go clean -modcache và ghim GOMODCACHE vào đường dẫn hiển thị; Go sẽ cần tải lại dependency. Nếu từng sửa nguồn trong cache, sao lưu thay đổi trước.",
                     "go env GOMODCACHE\ngo clean -modcache", "https://go.dev/ref/mod#module-cache"),
-                new CleanupGroup("go-build", "Go · build cache", "Dùng go clean -cache để dọn qua Go", Path.Combine(local, "go-build"), true, CleanupRule.InspectOnly,
+                new CleanupGroup("go-build", "Go · build cache", "Dùng go clean -cache để dọn qua Go", goBuild, true, CleanupRule.InspectOnly,
                     "Kiểm tra vị trí thực tế bằng go env GOCACHE. Nút Chạy lệnh dùng go clean -cache và ghim GOCACHE vào đường dẫn hiển thị. Build sau sẽ mất thêm thời gian. Không xóa thư mục go/bin hoặc go/src.",
                     "go env GOCACHE\ngo clean -cache", "https://go.dev/cmd/go/"),
                 new CleanupGroup("maven-repository", "Maven · repository", "Có thể chứa artifact nội bộ chỉ lưu tại máy", Path.Combine(user, @".m2\repository"), true, CleanupRule.InspectOnly,
                     "Không coi toàn bộ repository là dữ liệu có thể tải lại: mvn install có thể lưu artifact nội bộ chưa được publish. Nút Chạy lệnh thực hiện lựa chọn PowerShell xóa mọi nội dung repository, giữ thư mục gốc và .m2/settings.xml ở bên ngoài; cần xác nhận reset. Sao lưu artifact nội bộ trước khi chạy. Lệnh Maven tham khảo bên dưới là phương án khác: chạy trong dự án có pom.xml để purge dependency của dự án, không tự tải lại sau khi purge; không xóa toàn bộ repository.",
                     "mvn dependency:purge-local-repository -DreResolve=false", "https://maven.apache.org/plugins/maven-dependency-plugin/examples/purging-local-repository.html"),
-                new CleanupGroup("pub-cache", "Flutter / Dart · Pub cache", "Dọn bằng Pub; công cụ global cũng có thể bị ảnh hưởng", Path.Combine(local, @"Pub\Cache"), true, CleanupRule.InspectOnly,
+                new CleanupGroup("pub-cache", "Flutter / Dart · Pub cache", "Dọn bằng Pub; công cụ global cũng có thể bị ảnh hưởng", pubCache, true, CleanupRule.InspectOnly,
                     "Đóng Flutter/Dart và IDE trước khi chạy. Nút Chạy lệnh dùng flutter pub cache clean --force sau bước xác nhận, ghim PUB_CACHE vào đường dẫn hiển thị. Sau khi dọn có thể cần flutter pub get và kích hoạt lại công cụ global như FVM. Nếu đã sửa package trong cache, sao lưu trước. Đây không phải Flutter SDK.",
                     "flutter pub cache clean", "https://dart.dev/tools/pub/cmd/pub-cache"),
-                new CleanupGroup("fvm-sdks", "FVM · Flutter SDK", "SDK đã cài · chọn phiên bản khi gỡ", Path.Combine(user, "fvm"), true, CleanupRule.InspectOnly,
+                new CleanupGroup("fvm-sdks", "FVM · Flutter SDK", "SDK đã cài · chọn phiên bản khi gỡ", fvm, true, CleanupRule.InspectOnly,
                     "SDK không phải rác. Nút Chọn SDK / chạy liệt kê bản có trong fvm/versions để bạn chọn; sau xác nhận chạy fvm list rồi fvm remove cho đúng một phiên bản, ghim FVM_CACHE_PATH vào thư mục hiển thị. Kiểm tra .fvmrc của các dự án và bản global trước khi gỡ. Bản fork và cache tùy chỉnh cần quản lý bằng FVM. Không suy ra SDK chưa dùng từ tuổi file.",
                     "fvm list\nfvm remove <version>", "https://fvm.app/documentation/guides/basic-commands"),
                 new CleanupGroup("generic-cache", ".cache · dữ liệu nhiều công cụ", "Reset mọi nội dung · kiểm tra dữ liệu cần giữ", Path.Combine(user, ".cache"), true, CleanupRule.InspectOnly,
                     "Nút Chạy lệnh xóa toàn bộ nội dung .cache, giữ thư mục gốc. Xác định công cụ tạo dữ liệu và sao lưu phần cần giữ trước khi xác nhận reset; không phải mọi dữ liệu trong .cache đều có thể tải lại."),
-                new CleanupGroup("codex-data", ".codex · dữ liệu ứng dụng", "Reset dữ liệu · có thể mất cấu hình và lịch sử", Path.Combine(user, ".codex"), true, CleanupRule.InspectOnly,
+                new CleanupGroup("codex-data", ".codex · dữ liệu ứng dụng", "Reset dữ liệu · có thể mất cấu hình và lịch sử", codex, true, CleanupRule.InspectOnly,
                     "Nút Chạy lệnh xóa toàn bộ nội dung .codex, giữ thư mục gốc. Có thể mất cấu hình, xác thực, lịch sử, skills, plugins, worktrees và kết quả công việc chưa lưu. Đóng Codex/ChatGPT và sao lưu trước khi xác nhận reset. Khi phát hiện ứng dụng đó còn chạy, runner từ chối lệnh.", "", "https://learn.chatgpt.com/docs/config-file/config-basic"),
                 new CleanupGroup("gemini-data", ".gemini · dữ liệu ứng dụng", "Reset dữ liệu · có thể mất cấu hình và phiên làm việc", Path.Combine(user, ".gemini"), true, CleanupRule.InspectOnly,
                     "Nút Chạy lệnh xóa toàn bộ nội dung .gemini, giữ thư mục gốc. Có thể mất cấu hình, xác thực và phiên làm việc. Đóng Gemini, kiểm tra dữ liệu cần giữ và sao lưu trước khi xác nhận reset."),
@@ -288,8 +378,10 @@ namespace CleanSystem
 
         public ScanResult Scan(int days, CancellationToken token, Action<int> progress, bool developer = false, string groupId = null)
         {
-            if (days < 1 || days > 365) throw new ArgumentOutOfRangeException("days");
-            var result = new ScanResult { Groups = NewGroups().Where(g => g.IsDeveloper == developer).ToList(), CutoffUtc = DateTime.UtcNow.AddDays(-days) };
+            if (days < 0 || days > 365) throw new ArgumentOutOfRangeException("days");
+            // Zero disables age retention only. File identity, links, attributes and exclusive
+            // deletion handles are still checked at scan/cleanup time.
+            var result = new ScanResult { Groups = NewGroups().Where(g => g.IsDeveloper == developer).ToList(), CutoffUtc = days == 0 ? DateTime.MaxValue : DateTime.UtcNow.AddDays(-days) };
             if (groupId != null)
             {
                 result.Groups = result.Groups.Where(g => String.Equals(g.Id, groupId, StringComparison.Ordinal)).ToList();
@@ -299,6 +391,7 @@ namespace CleanSystem
             foreach (var group in result.Groups)
             {
                 if (token.IsCancellationRequested) { result.Canceled = true; break; }
+                if (group.BlockedReason != null) { group.State = group.BlockedReason; continue; }
                 if (group.Id == WindowsUpdateCache.GroupId && !administrator()) { group.State = "Cần Run as administrator · không được truy cập"; continue; }
                 if (!Directory.Exists(group.Root)) { group.State = "Không có / không truy cập được"; continue; }
                 group.Measured = true;
@@ -332,9 +425,9 @@ namespace CleanSystem
                                     group.TotalBytes += info.Length; group.TotalCount++;
                                     if (!group.CanClean || javaActive || !MatchesRule(group, entry)) continue;
                                     if (UnsafeAttributes(attributes)) { result.Skipped++; continue; }
-                                    if (info.LastWriteTimeUtc > result.CutoffUtc || info.CreationTimeUtc > result.CutoffUtc) { result.Skipped++; continue; }
+                                    if (info.LastWriteTimeUtc > result.CutoffUtc || info.CreationTimeUtc > result.CutoffUtc) { result.Skipped++; group.AgeSkippedCount++; group.AgeSkippedBytes += info.Length; continue; }
                                     FileCandidate file = NativeFiles.Snapshot(entry, group.Root, group.Name, false);
-                                    if (file.LastWriteUtc > result.CutoffUtc || file.CreatedUtc > result.CutoffUtc) { result.Skipped++; continue; }
+                                    if (file.LastWriteUtc > result.CutoffUtc || file.CreatedUtc > result.CutoffUtc) { result.Skipped++; group.AgeSkippedCount++; group.AgeSkippedBytes += file.Length; continue; }
                                     file.ScanCutoffUtc = result.CutoffUtc;
                                     group.Files.Add(file);
                                 }

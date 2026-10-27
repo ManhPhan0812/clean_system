@@ -36,6 +36,28 @@ namespace CleanSystem
         public string Error;
         public string LogPath;
         public string Output;
+        public string Summary;
+    }
+
+    internal static class ToolPresence
+    {
+        private static readonly object gate = new object();
+        private static readonly Dictionary<string, bool> cache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        // Cached per process: the row template reads CanRunCommand on every layout pass and each PATH probe is a syscall.
+        public static bool Has(string name)
+        {
+            if (String.IsNullOrEmpty(name)) return true;
+            lock (gate) { bool known; if (cache.TryGetValue(name, out known)) return known; }
+            bool found;
+            try { found = !String.IsNullOrEmpty(CommandRunner.ResolveTool(name)); }
+            catch (Exception) { found = false; }
+            lock (gate) { cache[name] = found; }
+            return found;
+        }
+        public static void Reset()
+        {
+            lock (gate) cache.Clear();
+        }
     }
 
     internal sealed class CommandRunner
@@ -67,6 +89,19 @@ namespace CleanSystem
                 case "fvm-sdks": return CommandAction.FvmVersion;
                 case "vscode-extensions": case "cursor-extensions": return CommandAction.OpenEditor;
                 default: return CommandAction.None;
+            }
+        }
+        // A command that needs a CLI is only offered when that CLI is on PATH; the mapping is fixed per id.
+        public static string ToolFor(string id)
+        {
+            switch (id)
+            {
+                case "go-modules": case "go-build": return "go";
+                case "pub-cache": return "flutter";
+                case "fvm-sdks": return "fvm";
+                case "vscode-extensions": return "code";
+                case "cursor-extensions": return "cursor";
+                default: return null;
             }
         }
         public static string ButtonText(string id)
@@ -260,8 +295,8 @@ namespace CleanSystem
                 "[Console]::WriteLine('Da kiem tra lai ' + $cleanSystemChecked + ' muc.')\n";
             script += "function Test-CleanSystemTree { param([switch]$RequireExists)\n" + validation + "}\nTest-CleanSystemTree\n";
             if (plan.Action == CommandAction.WindowsUpdateDownloads) script += WindowsUpdateCache.BuildBody(plan.Target, "Test-CleanSystemTree -RequireExists\n");
-            else if (plan.Action == CommandAction.RemoveFolder) script += "Remove-Item -LiteralPath " + target + " -Recurse -Force -ErrorAction Stop\nWrite-Output 'Da xoa thu muc dich.'\nexit 0\n";
-            else if (plan.Action == CommandAction.ClearContents) script += "Get-ChildItem -LiteralPath " + target + " -Force -ErrorAction Stop | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Output ('Da xoa: ' + $_.FullName) }\nexit 0\n";
+            else if (plan.Action == CommandAction.RemoveFolder || plan.Action == CommandAction.ClearContents)
+                script += BuildCacheCleanup(plan.Target, plan.Action == CommandAction.RemoveFolder);
             else
             {
                 if (plan.Action == CommandAction.GoModules) script += "$env:GOMODCACHE = " + root + "\n$env:GOTOOLCHAIN = 'local'\n";
@@ -271,6 +306,40 @@ namespace CleanSystem
                 script += "& " + Quote(plan.Executable) + " " + plan.Arguments + "\nexit $LASTEXITCODE\n";
             }
             return script + "} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }\n";
+        }
+        private static string BuildCacheCleanup(string target, bool removeRoot)
+        {
+            // No interactive PowerShell prompts. A per-file access/lock failure is logged and
+            // skipped; changed links still stop the operation because scope cannot be trusted.
+            return @"
+$script:cleanSystemDeleted = 0
+$script:cleanSystemSkipped = 0
+function Write-CleanSystemSkipped([string]$path, [string]$reason) {
+    $script:cleanSystemSkipped++
+    [Console]::WriteLine('SKIPPED ' + $path + '; ' + $reason)
+}
+function Remove-CleanSystemCacheEntry([string]$path) {
+    try {
+        $ioPath = Get-CleanSystemIOPath $path
+        $attributes = [IO.File]::GetAttributes($ioPath)
+        if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw [InvalidOperationException]::new('Linked entry changed: ' + $path) }
+        if ($attributes -band [IO.FileAttributes]::Directory) {
+            foreach ($child in [IO.Directory]::EnumerateFileSystemEntries($ioPath)) { Remove-CleanSystemCacheEntry $child }
+            if ([IO.File]::GetAttributes($ioPath) -band [IO.FileAttributes]::ReparsePoint) { throw [InvalidOperationException]::new('Linked directory changed: ' + $path) }
+            [IO.Directory]::Delete($ioPath, $false)
+        } else {
+            if ($attributes -band [IO.FileAttributes]::ReadOnly) { [IO.File]::SetAttributes($ioPath, ($attributes -band (-bnot [IO.FileAttributes]::ReadOnly))) }
+            [IO.File]::Delete($ioPath)
+        }
+        $script:cleanSystemDeleted++
+        [Console]::WriteLine('DELETED ' + $path)
+    } catch [UnauthorizedAccessException] { Write-CleanSystemSkipped $path $_.Exception.Message
+    } catch [IO.IOException] { Write-CleanSystemSkipped $path $_.Exception.Message }
+}
+" + (removeRoot ? "Remove-CleanSystemCacheEntry " + Quote(target) + "\n" :
+                "foreach ($cleanSystemEntry in [IO.Directory]::EnumerateFileSystemEntries((Get-CleanSystemIOPath " + Quote(target) + "))) { Remove-CleanSystemCacheEntry $cleanSystemEntry }\n") +
+                "[Console]::WriteLine('SUMMARY deleted=' + $script:cleanSystemDeleted + '; skipped=' + $script:cleanSystemSkipped)\n" +
+                "if ($script:cleanSystemSkipped -gt 0) { exit 2 }; exit 0\n";
         }
         public CommandResult Run(CommandPlan plan, string logDirectory, CancellationToken token, Action<string> progress, Action serviceBoundary = null)
         {
@@ -322,7 +391,16 @@ namespace CleanSystem
                         try { job.Attach(process); }
                         catch { if (!process.HasExited) process.Kill(); throw; }
                         // The script waits on stdin, so no cleanup/tool child can start before job assignment and audit flush.
-                        Task stdout = Task.Run(() => ReadLines(process.StandardOutput, report, "OUT "));
+                        string summaryTail = "";
+                        Task stdout = Task.Run(() => ReadLines(process.StandardOutput, line => {
+                            if (plan.Action == CommandAction.ClearContents || plan.Action == CommandAction.RemoveFolder) {
+                                summaryTail += line;
+                                var summary = Regex.Match(summaryTail, @"(?:^|\n)SUMMARY deleted=(\d+); skipped=(\d+)\r?\n");
+                                if (summary.Success) result.Summary = "Đã xóa " + summary.Groups[1].Value + " file/thư mục; bỏ qua " + summary.Groups[2].Value + " file/thư mục.";
+                                if (summaryTail.Length > 512) summaryTail = summaryTail.Substring(summaryTail.Length - 512);
+                            }
+                            report("OUT " + line);
+                        }, ""));
                         Task stderr = Task.Run(() => ReadLines(process.StandardError, report, "ERR "));
                         if (token.IsCancellationRequested || loggingError != null) { result.Canceled = token.IsCancellationRequested; job.Stop(); }
                         else
@@ -346,7 +424,9 @@ namespace CleanSystem
                         // Prevent a detached child from continuing cleanup after its launcher exits.
                         job.Stop(); Task.WaitAll(stdout, stderr);
                         if (loggingError != null) throw new IOException(recoveringServices ? "Không ghi được nhật ký; đã chờ lệnh kết thúc bước khởi động lại dịch vụ." : "Không ghi được nhật ký; đã dừng lệnh.", loggingError);
-                        if (!result.Canceled && result.ExitCode != 0 && result.Error == null) result.Error = "Lệnh kết thúc với mã lỗi " + result.ExitCode + ". Xem đầu ra và nhật ký.";
+                        bool skippedCacheItems = result.ExitCode == 2 && result.Summary != null &&
+                            (plan.Action == CommandAction.ClearContents || plan.Action == CommandAction.RemoveFolder);
+                        if (!result.Canceled && result.ExitCode != 0 && !skippedCacheItems && result.Error == null) result.Error = "Lệnh kết thúc với mã lỗi " + result.ExitCode + ". Xem đầu ra và nhật ký.";
                         report("END exit=" + result.ExitCode + "; canceled=" + result.Canceled);
                         if (loggingError != null) throw loggingError;
                         lock (gate) file.Flush(true);

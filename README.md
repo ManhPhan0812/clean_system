@@ -2,7 +2,7 @@
 
 **v1.0.0** · **by Until You**
 
-Ứng dụng desktop tiếng Việt để quét và dọn **file tạm cũ trên ổ C**, đồng thời thống kê **Other / dữ liệu lập trình**, viết bằng C# / WPF. Chạy tại máy, không gửi dữ liệu lên mạng, không cần cài Node.js, Python hoặc .NET SDK.
+Ứng dụng desktop tiếng Việt để quét và dọn **file tạm trên ổ C**, đồng thời thống kê **Other / dữ liệu lập trình**, viết bằng C# / WPF. Chạy tại máy, không gửi dữ liệu lên mạng, không cần cài Node.js, Python hoặc .NET SDK.
 
 ## Chạy ứng dụng
 
@@ -10,13 +10,13 @@ Yêu cầu Windows 10/11 và .NET Framework 4.8. Tải `DonDepOCung.exe` tại [
 
 Nút **Làm mới** cạnh **Dung lượng trống · C:** có trên cả **Dọn file tạm** và **Other / lập trình** để cập nhật dung lượng trống, đã dùng và thanh dung lượng ổ C. Thao tác này giữ kết quả quét và các mục đã chọn; không quét lại thư mục.
 
-1. Chọn thời gian giữ file mới: 1, 7, 14 hoặc 30 ngày (mặc định 7 ngày).
+1. Mặc định **Không giới hạn ngày**: xét cả file mới tạo trong Temp người dùng và Temp Windows. Có thể chọn 1, 7, 14 hoặc 30 ngày để giữ lại file mới hơn ngưỡng.
 2. Bấm **Quét ổ C**. Quét chỉ đọc thông tin, chưa xóa dữ liệu.
 3. Chọn nhóm cần dọn, bấm **Xem danh sách** để xem tối đa 1.000 file lớn nhất.
 4. Bấm **Dọn mục đã chọn** và đọc xác nhận. File được xóa **vĩnh viễn**, không qua Thùng rác.
 5. Quét lại sau khi dọn để cập nhật. Có thể bấm **Dừng**; những file đã xóa trước khi dừng không được khôi phục.
 
-Ứng dụng chạy với quyền tài khoản hiện tại. File không đủ quyền sẽ được bỏ qua; không tự xin quyền quản trị.
+Ứng dụng khởi động bằng quyền tài khoản hiện tại. Khi quét có chọn **File tạm Windows** mà chưa có quyền quản trị, ứng dụng hỏi **Có / Không**: chọn **Có** để Windows hiện UAC và mở lại chính EXE bằng quyền quản trị; chọn **Không** hoặc từ chối UAC để tiếp tục bằng quyền hiện tại, bỏ qua mục thiếu quyền. Có thể bấm **Cấp quyền Windows Temp** để thử lại. Bản quản trị giữ lựa chọn tuổi file, chỉ chọn nhóm Windows Temp và yêu cầu quét lại rồi xác nhận dọn; không chuyển danh sách file từ bản cũ và không tự xóa sau UAC. Nếu đã chạy bằng admin, ứng dụng không hỏi cấp quyền lần nữa. Những file bị khóa hoặc được bảo vệ vẫn có thể bị bỏ qua dù có quyền admin.
 
 ## Phạm vi và cách kiểm tra
 
@@ -28,7 +28,7 @@ Chỉ quét các đường dẫn sau nếu nằm trên ổ C:
 
 Báo cáo lỗi là nhóm tùy chọn, không chọn sẵn. Xóa nhóm `ReportQueue` có thể làm mất báo cáo lỗi chưa gửi.
 
-Chỉ nhận file có cả ngày tạo và ngày sửa cuối cùng cũ hơn ngưỡng. Trước khi xóa, kiểm tra lại đường dẫn thực tế, mã định danh file, dung lượng và thời gian. Bỏ qua file đang được đọc/ghi, file chỉ đọc, file hệ thống, file offline, hard link, symlink/junction và thư mục có tổ tiên là liên kết. Không đổi quyền hoặc thuộc tính để ép xóa, không xóa thư mục. Việc file tạm đã cũ không đảm bảo ứng dụng tạo ra nó không còn cần nó; xem danh sách và đóng các ứng dụng liên quan trước khi dọn.
+Ở chế độ **Không giới hạn ngày**, không loại file vì ngày tạo hoặc ngày sửa. Nếu chọn mức 1/7/14/30 ngày, chỉ nhận file có cả ngày tạo và ngày sửa cuối cùng cũ hơn ngưỡng; dòng **Giữ do tuổi file** cho biết số file và dung lượng bị loại vì điều kiện này. Trước khi xóa, kiểm tra lại đường dẫn thực tế, mã định danh file, dung lượng và thời gian. Bỏ qua file đang được đọc/ghi, file chỉ đọc, file hệ thống, file offline, hard link, symlink/junction và thư mục có tổ tiên là liên kết. Không đổi quyền hoặc thuộc tính để ép xóa, không xóa thư mục. Xem danh sách và đóng các ứng dụng, trình cài đặt liên quan trước khi dọn; file tạm mới tạo có thể còn cần dùng dù hiện chưa bị khóa.
 
 Chức năng dọn file tạm không quét/xóa Downloads, Desktop, Documents, Thùng rác, bộ nhớ trình duyệt, Registry, `Windows.old`, `WinSxS`, `SoftwareDistribution`, `pagefile.sys` hoặc `hiberfil.sys`. **Thùng rác** có mục riêng và yêu cầu xác nhận riêng. **Windows Update · Download** trong Other có thao tác riêng để dọn cache cập nhật. Nút **Lưu trữ Windows** mở công cụ của Windows để người dùng tự xem thêm các mục. Microsoft mô tả các tùy chọn này tại [Free up drive space in Windows](https://support.microsoft.com/en-us/windows/experience/storage-filemanagement/free-up-drive-space-in-windows).
 
@@ -40,15 +40,17 @@ Nhật ký TSV UTF-8 lưu ở `%LOCALAPPDATA%\CleanSystem\Logs`, gồm đường
 
 Mở **Thùng rác** trên sidebar để đọc tổng dung lượng và số mục trên **tất cả ổ đĩa của tài khoản Windows hiện tại**, bao gồm cả ổ C, D và các ổ khác. **Làm mới** cập nhật số liệu. **Mở Thùng rác Windows** mở File Explorer để xem/khôi phục dữ liệu cần giữ trước khi dọn.
 
-Bấm **Dọn thùng rác** và xác nhận **Có / Không** để xóa vĩnh viễn toàn bộ Thùng rác trên **tất cả ổ đĩa** của tài khoản hiện tại; không áp dụng thời gian giữ file. Nút dọn bị tắt nếu chưa đọc được thông tin hoặc Thùng rác đang trống. Ứng dụng đọc lại số lượng/dung lượng sau xác nhận và từ chối dọn nếu số liệu đã thay đổi. Windows xử lý toàn bộ Thùng rác trên tất cả ổ đĩa tại thời điểm gọi API, nên không có snapshot bất biến cho từng file; tránh thêm dữ liệu vào Thùng rác trong lúc dọn.
+Bấm **Dọn thùng rác** và xác nhận **Có / Không** để xóa vĩnh viễn các mục trong Thùng rác trên **tất cả ổ đĩa** của tài khoản hiện tại; không áp dụng thời gian giữ file. Nút dọn bị tắt nếu chưa đọc được thông tin hoặc Thùng rác đang trống. Ứng dụng đọc lại số lượng/dung lượng sau xác nhận và từ chối dọn nếu số liệu đã thay đổi, rồi lấy danh sách Shell trước khi xóa từng mục. Các mục thêm vào sau khi lấy danh sách không được dọn trong lượt này.
 
-Dùng API Windows [SHQueryRecycleBinW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shqueryrecyclebinw) và [SHEmptyRecycleBinW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shemptyrecyclebinw), truyền `null` làm đường dẫn gốc để áp dụng cho tất cả ổ đĩa. Nhật ký ghi rõ `scope=all-drives`. Không xóa trực tiếp `$Recycle.Bin`, không nâng quyền. Windows chạy trên luồng STA riêng để giao diện vẫn phản hồi. API dọn Thùng rác không có cơ chế hủy nên **không có nút Dừng** cho thao tác này; đợi hoàn tất trước khi đóng cửa sổ.
+Dùng [SHQueryRecycleBinW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shqueryrecyclebinw) với gốc `null` để đo tất cả ổ đĩa, và [IFileOperation](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ifileoperation) trên từng mục của namespace Thùng rác. Không xóa trực tiếp `$Recycle.Bin`. Khi cần quyền xóa, popup **Có / Không** xuất hiện: **Có** cho phép Windows thử lại riêng mục đó và hỏi quyền quản trị nếu cần; **Không**, Esc hoặc đóng popup giữ mục đó và tiếp tục các mục còn lại. Từ chối UAC cũng chỉ bỏ qua mục hiện tại. File bị khóa/không xóa được được giữ lại, không lặp thử vô hạn. Luồng STA có vòng xử lý thông điệp cho Shell/COM; giao diện cập nhật số mục đã xóa/bỏ qua, tự tắt tiến trình và báo kết quả khi kết thúc, kể cả khi còn dữ liệu. **Không có nút Dừng** trong thao tác Shell; đợi hoàn tất trước khi đóng cửa sổ.
 
-Nhật ký `recycle-bin-*.log` lưu phạm vi, số lượng/dung lượng trước và sau, HRESULT và kết quả. Không gọi API xóa nếu chưa ghi được nhật ký. Lỗi API có thể đã xóa một phần dữ liệu; giao diện sẽ báo lỗi và số mục còn lại nếu đọc được. Dung lượng Windows báo cáo không đảm bảo bằng chính xác dung lượng trống tăng thêm. Kiểm thử chỉ gọi API đọc Thùng rác thật; thao tác xóa được kiểm thử bằng API giả.
+Nhật ký `recycle-bin-*.log` lưu phạm vi `scope=all-drives`, từng lần thử/xóa/bỏ qua và lựa chọn quyền, số lượng/dung lượng trước và sau. Không gọi API xóa nếu chưa ghi được nhật ký. Một thư mục có thể đã xóa một phần nội dung trước khi gặp mục không xóa được; số mục đã xóa chỉ tính các mục Shell hoàn tất, còn số mục bỏ qua bao gồm thư mục chưa xóa hết. Dung lượng Windows báo cáo không đảm bảo bằng chính xác dung lượng trống tăng thêm. Kiểm thử xóa dùng API giả hoặc file fixture riêng; Thùng rác thật chỉ được đọc.
 
 ## Other / lập trình
 
-Mở **Other / lập trình** rồi bấm **Quét Other** để đo các vị trí mặc định của tài khoản hiện tại trên ổ C. Chọn một dòng và bấm **Cách dọn** để xem đường dẫn, giải thích, lệnh tham khảo, mở thư mục hoặc tài liệu chính thức. Nút **Sao chép lệnh** chỉ ghi vào clipboard, không chạy lệnh. Thống kê này không mô phỏng chính xác cách Windows phân loại mục Other và không phải toàn bộ ổ C.
+Mở **Other / lập trình** rồi bấm **Quét Other** để đo các vị trí mặc định của tài khoản hiện tại trên ổ C. Đường dẫn được ghép theo tài khoản đang đăng nhập; nếu công cụ có biến môi trường cache riêng (xem bên dưới) thì dùng giá trị đó thay cho đường mặc định. Chọn một dòng và bấm **Cách dọn** để xem đường dẫn, giải thích, lệnh tham khảo, mở thư mục hoặc tài liệu chính thức. Nút **Sao chép lệnh** chỉ ghi vào clipboard, không chạy lệnh. Thống kê này không mô phỏng chính xác cách Windows phân loại mục Other và không phải toàn bộ ổ C.
+
+Mỗi dòng tự cho biết trạng thái trên máy này: có dữ liệu, chưa có thư mục, hay chưa cài công cụ. Tùy chọn **Chỉ hiện mục có trên máy** ẩn những dòng vừa không có thư mục vừa không có công cụ trong PATH; bỏ chọn để xem đủ danh sách. Nút **Chạy lệnh** bị tắt khi thiếu CLI tương ứng, và tooltip nói rõ cần cài gì. Trạng thái được đọc lại mỗi lần mở màn hình hoặc đổi bộ lọc, nên cài công cụ xong không cần khởi động lại ứng dụng.
 
 Để quét riêng, bấm **Quét thư mục này** ngay trên dòng tương ứng, ví dụ Go, Maven, FVM hoặc `.codex`. Lượt này chỉ duyệt thư mục của dòng đó; không cần quét cả Other trước. Các dòng chưa quét vẫn có tổng dung lượng `—`. Kết quả và lựa chọn của những dòng đã quét trước được giữ lại; quét lại một dòng sẽ thay kết quả của chính dòng đó, không cộng trùng file. Có thể dừng lượt quét riêng: các file tìm thấy trong lượt bị dừng không được dùng để dọn, còn kết quả hoàn tất của dòng khác vẫn dùng được. **Quét Other** vẫn quét toàn bộ và thay toàn bộ kết quả.
 
@@ -69,7 +71,7 @@ Không chọn sẵn nhóm lập trình. Đóng IDE, dừng build và Gradle daem
 
 **Chạy lệnh** có ngay trên từng dòng; không cần quét trước. Hộp xác nhận hiển thị lệnh thực tế, thư mục đích và phạm vi xóa. Mọi thao tác cần xác nhận — dọn file tạm, chạy lệnh và dọn Thùng rác — dùng cùng popup **Có / Không**, không yêu cầu gõ tên thư mục hoặc tick checkbox. **Không** là lựa chọn mặc định; Esc hoặc đóng popup cũng hủy thao tác. Chỉ bấm **Có** mới tiếp tục. Các lệnh không áp dụng ngưỡng tuổi file hoặc snapshot của nút **Dọn mục đã chọn**. Xóa `caches` có thể khiến build sau phải tải lại dependency và không build offline được. Dừng daemon của các phiên bản đang dùng, ví dụ `.\gradlew.bat --stop` trong dự án, rồi đóng IDE trước khi chạy lệnh. Reset `.codex` bị chặn khi phát hiện Codex/ChatGPT đang chạy; đóng ứng dụng đó trước khi reset.
 
-Runner chỉ chạy thao tác cố định theo ID và đường dẫn đăng ký sẵn, không chạy nguyên văn chuỗi hướng dẫn hoặc cho nhập lệnh tùy ý. Kiểm tra lại đích, các tổ tiên và toàn bộ cây con; từ chối symlink/junction trước khi xóa. PowerShell kiểm tra lại đích và dùng `-LiteralPath`. Không tự nâng quyền. Chạy không có cửa sổ terminal mới; kết quả/mã thoát được hiển thị trong ứng dụng và lưu `command-*.log` tại `%LOCALAPPDATA%\CleanSystem\Logs`. Nếu chưa ghi được nhật ký, lệnh không được khởi chạy. Đầu ra trên giao diện giới hạn khoảng 48 KB; nhật ký giữ đầu ra đầy đủ.
+Runner chỉ chạy thao tác cố định theo ID và đường dẫn đăng ký sẵn, không chạy nguyên văn chuỗi hướng dẫn hoặc cho nhập lệnh tùy ý. Kiểm tra lại đích, các tổ tiên và toàn bộ cây con; từ chối symlink/junction trước khi xóa. PowerShell kiểm tra lại đích và dùng đường dẫn nguyên văn. Các thao tác xóa thư mục/nội dung trong Other xử lý từng file/thư mục: file bị khóa hoặc thiếu quyền được giữ lại, ghi `SKIPPED` và tiếp tục các mục khác; liên kết xuất hiện sau kiểm tra vẫn khiến thao tác dừng. Kết quả hiển thị tổng đã xóa/bỏ qua, kể cả khi đầu ra chi tiết bị giới hạn. Không tự nâng quyền các lệnh Other. Chạy không có cửa sổ terminal mới; kết quả/mã thoát được hiển thị trong ứng dụng và lưu `command-*.log` tại `%LOCALAPPDATA%\CleanSystem\Logs`. Nếu chưa ghi được nhật ký, lệnh không được khởi chạy. Đầu ra trên giao diện giới hạn khoảng 48 KB; nhật ký giữ đầu ra đầy đủ.
 
 **Dừng** có thể hủy bước kiểm tra thư mục trước khi chạy lệnh; bước này có tiến độ và giới hạn 60 giây. Nếu lỗi/hủy, nhật ký ghi `END precheck` và lệnh chưa được chạy. Với lệnh thông thường, Dừng kết thúc cả cây tiến trình bằng Windows Job Object; phần đã xóa không được khôi phục. Lệnh thông thường quá 30 phút cũng bị dừng. **Ngoại lệ: Windows Update** ẩn nút Dừng khi bắt đầu chạy lệnh để bước khởi động lại dịch vụ có thể hoàn tất. Sau mọi lần chạy, kể cả lỗi/hủy, xóa snapshot quét cũ và yêu cầu quét lại. Một lệnh xóa gặp file bị khóa hoặc thiếu quyền có thể đã xóa một phần trước khi báo lỗi. File log bị lỗi khi lệnh thông thường đang chạy sẽ khiến runner dừng tác vụ; với Windows Update, runner chờ bước khởi động lại dịch vụ rồi báo lỗi nhật ký. Nhật ký không phải bản sao lưu.
 
@@ -95,7 +97,9 @@ Kiểm thử dùng thư mục fixture, dịch vụ và trạng thái cập nhậ
 
 `Remove-Item -Recurse -Force .gitnexus` xóa thư mục tương đối trong vị trí terminal hiện tại. Dòng GitNexus của ứng dụng thống kê `%USERPROFILE%\.gitnexus`; lệnh sao chép nhắm chính xác vị trí đó, xóa cả `indexes`, `registry.json` và dữ liệu khác nếu có. Dừng server/MCP, kiểm tra và sao lưu dữ liệu cần giữ trước khi xóa. Để chỉ xóa index của một dự án, đối chiếu `gitnexus clean` trong đúng dự án theo [mã nguồn chính thức của GitNexus](https://github.com/abhigyanpatwari/GitNexus/blob/main/gitnexus/src/cli/clean.ts); không nhầm thư mục tài khoản với thư mục trong repository.
 
-Các đường dẫn thống kê là **vị trí mặc định**, không tự đọc cấu hình tùy chỉnh như `GRADLE_USER_HOME`, `GOPATH`, Maven `settings.xml` hay `CODEX_HOME`. Với Go/Pub/FVM, runner ghim biến cache vào đường dẫn hiển thị để không vô tình dọn cache tùy chỉnh ở nơi khác; biến môi trường của hệ thống không bị thay đổi. CLI cần được cài và có trong PATH; thiếu CLI sẽ báo lỗi trước khi chạy. Lệnh dùng thư mục làm việc của ứng dụng, không chạy trong repository của bạn. Chuyển màn hình hoặc đổi thời gian giữ file sẽ bỏ kết quả quét cũ.
+Các đường dẫn thống kê là **vị trí mặc định** của tài khoản hiện tại. Ứng dụng đọc thêm biến môi trường cache do chính công cụ công bố — `GRADLE_USER_HOME`, `GOMODCACHE`, `GOCACHE`, `PUB_CACHE`, `FVM_CACHE_PATH`, `CODEX_HOME` — và dùng giá trị đó thay cho đường mặc định; biến không đặt, không phải đường dẫn tuyệt đối hoặc không dùng được thì giữ mặc định. Ứng dụng vẫn không đọc `GOPATH` khi khác `GOMODCACHE`, Maven `settings.xml` hay cấu hình riêng khác, nên cache tùy chỉnh ngoài các biến trên cần quản lý bằng chính công cụ đó.
+
+Nếu biến trỏ ra ngoài ổ C, dòng vẫn hiển thị nhưng ghi **Ngoài ổ C · chỉ hiển thị, không quét** và không được đo hay dọn. Với Go/Pub/FVM, runner ghim biến cache vào **đúng đường dẫn hiển thị** (đường đã resolve) để không vô tình dọn cache tùy chỉnh ở nơi khác; biến môi trường của hệ thống không bị thay đổi. CLI cần được cài và có trong PATH; thiếu CLI thì nút Chạy lệnh bị tắt và không chạy lệnh. Lệnh dùng thư mục làm việc của ứng dụng, không chạy trong repository của bạn. Chuyển màn hình, đổi thời gian giữ file hoặc đổi bộ lọc hiển thị sẽ bỏ kết quả quét cũ.
 
 Tài liệu đối chiếu: [Go module cache](https://go.dev/ref/mod#module-cache), [Gradle directories và cleanup](https://docs.gradle.org/current/userguide/directory_layout.html), [Maven purge](https://maven.apache.org/plugins/maven-dependency-plugin/examples/purging-local-repository.html), [Dart Pub cache](https://dart.dev/tools/pub/cmd/pub-cache), [FVM commands](https://fvm.app/documentation/guides/basic-commands), [OpenAI Docs: Codex config](https://learn.chatgpt.com/docs/config-file/config-basic). Maven purge mặc định sẽ resolve lại dependency; không nên dùng lệnh mặc định với kỳ vọng xóa sạch toàn bộ repository để giảm dung lượng.
 
@@ -122,11 +126,13 @@ Kiểm thử tạo fixture riêng trong `test-output`, không dọn thư mục t
 - `src/Program.cs`: điều khiển giao diện và thao tác bất đồng bộ.
 - `src/Commands.cs`: tạo lệnh cố định, kiểm tra đích, chạy CLI/PowerShell, audit và dừng cây tiến trình.
 - `src/WindowsUpdate.cs`: lưu ý, quyền quản trị, kiểm tra trạng thái cập nhật và thao tác cache với khởi động lại dịch vụ trong finally.
-- `src/RecycleBin.cs`: đọc/dọn Thùng rác trên tất cả ổ đĩa qua Shell API, xác nhận phạm vi, audit và luồng STA.
+- `src/TempElevation.cs`: khởi chạy lại chính EXE qua UAC để quét/dọn Windows Temp, chỉ nhận lựa chọn tuổi file đã định nghĩa và không nhận lệnh/path xóa.
+- `src/RecycleBin.cs`: xác nhận phạm vi, dọn từng mục Thùng rác, audit và luồng STA có xử lý thông điệp.
+- `src/ShellRecycleBin.cs`: lấy danh sách mục Shell và xóa riêng từng mục qua IFileOperation, phân biệt xóa/bỏ qua/yêu cầu quyền.
 - `src/MainWindow.xaml`: giao diện WPF.
 - `tests/CleanerTests.cs`: kiểm thử bằng file và liên kết thật trong fixture.
 - `tests/CommandTests.cs`: chạy lệnh xóa trên fixture, CLI giả, kiểm tra quoting, junction, audit, lỗi và hủy tiến trình con; không chạy lệnh dọn thật của Go/Flutter/FVM.
-- `tests/RecycleBinTests.cs`: kiểm tra phạm vi, xác nhận cũ, lỗi audit/API và trạng thái trống bằng API giả; chỉ kiểm tra API đọc thật của Windows.
+- `tests/RecycleBinTests.cs`: kiểm tra phạm vi, xác nhận cũ, audit, chọn Có/Không, từ chối UAC, bỏ qua rồi tiếp tục, xử lý thông điệp STA; kiểm tra Shell delete với file/thư mục fixture và đọc Thùng rác thật.
 - `tests/WindowsUpdateTests.cs`: kiểm tra cache cập nhật trên fixture, mock toàn bộ dịch vụ/WUA, lỗi stop/start, file bị khóa, kiểm tra lại đích và hoàn thành khởi động lại dịch vụ khi đóng Job Object.
 - `Build.ps1`: build không cần SDK, chạy kiểm thử khi có `-Test`.
 

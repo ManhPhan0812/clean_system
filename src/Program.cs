@@ -34,12 +34,15 @@ namespace CleanSystem
             bool smoke = args.Length == 1 && args[0] == "--smoke-test";
             try
             {
+                int elevatedTempDays;
+                bool elevatedTemp = TempElevation.TryReadArguments(args, out elevatedTempDays);
                 var application = new Application();
                 application.DispatcherUnhandledException += delegate(object sender, DispatcherUnhandledExceptionEventArgs e) {
                     MessageBox.Show("Không thể hoàn tất thao tác.\n" + e.Exception.Message, "Dọn dẹp ổ cứng", MessageBoxButton.OK, MessageBoxImage.Error);
                     e.Handled = true;
                 };
                 var controller = new MainController();
+                if (elevatedTemp) controller.ConfigureWindowsTemp(elevatedTempDays);
                 if (smoke)
                 {
                     // Run the real WPF layout/binding lifecycle without showing a visible window.
@@ -68,6 +71,7 @@ namespace CleanSystem
                     using (var stream = File.Create(Path.Combine(directory, "preview-developer.png"))) encoder.Save(stream);
                     controller.VerifyCommandDialogs();
                     controller.VerifyAdminAccess();
+                    controller.VerifyTempElevation();
                     controller.VerifyRecyclePage();
                     File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: XAML loaded, controls bound, window rendered; no scan or deletion performed.", Encoding.UTF8);
                     controller.Window.Close();
@@ -92,7 +96,10 @@ namespace CleanSystem
         private readonly Func<bool> administrator;
         private readonly Action<string> accessWarning;
         private readonly CommandRunner commandRunner = new CommandRunner();
-        private readonly RecycleBinService recycleService = new RecycleBinService();
+        private readonly RecycleBinService recycleService;
+        private readonly Func<ProcessStartInfo, bool> elevationLauncher;
+        private bool declinedTempElevation;
+        private Func<string, string, bool> confirmationProbe;
         private readonly string logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"CleanSystem\Logs");
         private ScanResult scan;
         private CancellationTokenSource cancellation;
@@ -106,10 +113,14 @@ namespace CleanSystem
         private Button recycleNavButton, recycleRefreshButton, recycleEmptyButton, recycleOpenButton;
         private DataGrid groupsGrid;
         private ComboBox ageBox;
+        private CheckBox presentOnlyBox;
+        private bool onlyPresent;
         private TextBlock statusText, selectedText, selectedCountText;
 
-        public MainController(Func<bool> adminProbe = null, Action<string> warning = null)
+        public MainController(Func<bool> adminProbe = null, Action<string> warning = null, RecycleBinService recycleOperations = null, Func<ProcessStartInfo, bool> elevatedLauncher = null)
         {
+            elevationLauncher = elevatedLauncher ?? (info => { using (var process = Process.Start(info)) return process != null; });
+            recycleService = recycleOperations ?? new RecycleBinService();
             administrator = adminProbe ?? WindowsUpdateCache.IsAdministrator;
             cleaner = new Cleaner(administrator);
             accessWarning = warning ?? (message => MessageBox.Show(Window, message, "Cần quyền quản trị", MessageBoxButton.OK, MessageBoxImage.Warning));
@@ -122,6 +133,7 @@ namespace CleanSystem
             recycleNavButton = Find<Button>("RecycleNavButton"); recycleRefreshButton = Find<Button>("RecycleRefreshButton");
             recycleEmptyButton = Find<Button>("RecycleEmptyButton"); recycleOpenButton = Find<Button>("RecycleOpenButton");
             groupsGrid = Find<DataGrid>("GroupsGrid"); ageBox = Find<ComboBox>("AgeBox");
+            presentOnlyBox = Find<CheckBox>("PresentOnlyBox");
             statusText = Find<TextBlock>("StatusText"); selectedText = Find<TextBlock>("SelectedText"); selectedCountText = Find<TextBlock>("SelectedCountText");
             ResetGroups();
             groupsGrid.PreviewMouseDown += delegate(object sender, System.Windows.Input.MouseButtonEventArgs e) {
@@ -148,6 +160,7 @@ namespace CleanSystem
             }));
             scanButton.Click += async delegate { await ScanAsync(); };
             diskRefreshButton.Click += delegate { RefreshDisk(); };
+            Find<Button>("TempAdminButton").Click += delegate { RequestTempElevation(); };
             cleanButton.Click += async delegate { await CleanAsync(); };
             previewButton.Click += delegate { ShowPreview(); };
             guideButton.Click += delegate { ShowGuide(); };
@@ -157,6 +170,8 @@ namespace CleanSystem
                 scan = null; ResetGroups(); UpdateSelection();
                 statusText.Text = "Đã đổi thời gian giữ file. Quét lại để cập nhật danh sách.";
             };
+            presentOnlyBox.Checked += delegate { PresentFilterChanged(); };
+            presentOnlyBox.Unchecked += delegate { PresentFilterChanged(); };
             homeButton.Click += delegate { SetMode(false); };
             developerButton.Click += delegate { SetMode(true); };
             recycleNavButton.Click += async delegate { if (busy) return; EnterRecycleMode(); await RefreshRecycleAsync(); };
@@ -183,12 +198,57 @@ namespace CleanSystem
             RefreshDisk();
             Find<DataGridTemplateColumn>("FolderScanColumn").Visibility = Visibility.Collapsed;
             Find<DataGridTemplateColumn>("RunCommandColumn").Visibility = Visibility.Collapsed;
+            UpdateTempElevationNotice();
+        }
+        private void UpdateTempElevationNotice()
+        {
+            var notice = Find<StackPanel>("TempAdminNotice");
+            notice.Visibility = !developerMode && !recycleMode && !administrator() ? Visibility.Visible : Visibility.Collapsed;
+            Find<Button>("TempAdminButton").IsEnabled = !busy;
+        }
+        public void ConfigureWindowsTemp(int days)
+        {
+            SetMode(false);
+            ageBox.SelectedItem = ageBox.Items.Cast<ComboBoxItem>().Single(item => item.Tag.ToString() == days.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            foreach (var group in (IEnumerable<CleanupGroup>)groupsGrid.ItemsSource) group.Selected = group.Id == "windows-temp";
+            groupsGrid.Items.Refresh(); UpdateSelection();
+            statusText.Text = administrator() ? "Đã mở bằng quyền quản trị. Bấm Quét ổ C để đọc lại Windows Temp, xem danh sách rồi xác nhận dọn." : "Chưa được cấp quyền quản trị. Có thể quét bằng quyền hiện tại hoặc bấm Cấp quyền Windows Temp.";
+        }
+        private bool RequestTempElevation()
+        {
+            if (busy || developerMode || recycleMode || administrator()) return false;
+            declinedTempElevation = true;
+            if (!ConfirmAction("Cấp quyền dọn Windows Temp?", "Một số mục trong C:\\Windows\\Temp cần quyền quản trị, giống hộp thoại quyền khi bạn xóa bằng File Explorer.\n\nChọn Có để Windows hiện UAC và mở lại ứng dụng bằng quyền quản trị. Sau đó quét lại Windows Temp, xem danh sách và xác nhận dọn. Chưa xóa file ở bước cấp quyền.\n\nChọn Không hoặc từ chối UAC để giữ ứng dụng hiện tại và tiếp tục với các file đang có quyền truy cập. Các mục thiếu quyền sẽ được bỏ qua.")) return false;
+            try {
+                int days = Int32.Parse(((ComboBoxItem)ageBox.SelectedItem).Tag.ToString());
+                var info = TempElevation.CreateStartInfo(Assembly.GetExecutingAssembly().Location, days,
+                    new System.Windows.Interop.WindowInteropHelper(Window).Handle);
+                if (!elevationLauncher(info)) { statusText.Text = "Không mở được bản quản trị. Ứng dụng hiện tại vẫn hoạt động."; return false; }
+                Window.Close(); return true;
+            }
+            catch (System.ComponentModel.Win32Exception e) {
+                statusText.Text = e.NativeErrorCode == 1223 ? "Bạn chưa cấp quyền quản trị. Tiếp tục bằng quyền hiện tại; bỏ qua các mục thiếu quyền." : "Không mở được bản quản trị: " + e.Message;
+            }
+            catch (Exception e) { statusText.Text = "Không mở được bản quản trị: " + e.Message; }
+            return false;
         }
         private void ResetGroups()
         {
-            var groups = cleaner.NewGroups().Where(g => g.IsDeveloper == developerMode).ToList();
+            // Presence is re-read here so a cache folder created (or a CLI installed) since launch is picked up.
+            cleaner.RefreshEnvironment();
+            var groups = cleaner.NewGroups().Where(g => g.IsDeveloper == developerMode)
+                .Where(g => !onlyPresent || g.Applicable).ToList();
             foreach (var group in groups) if (!CanAccessGroup(group.Id)) group.State = "Cần Run as administrator · không được truy cập";
             groupsGrid.ItemsSource = groups;
+        }
+        private void PresentFilterChanged()
+        {
+            if (busy || recycleMode) return;
+            onlyPresent = presentOnlyBox.IsChecked == true;
+            scan = null; ResetGroups(); UpdateSelection();
+            statusText.Text = onlyPresent
+                ? "Đang chỉ hiện mục có thư mục hoặc công cụ trên máy này. Quét lại để đo dung lượng."
+                : "Đang hiện tất cả các mục. Quét lại để đo dung lượng.";
         }
         private bool CanAccessGroup(string groupId) { return groupId != WindowsUpdateCache.GroupId || administrator(); }
         private void WarnGroupAccess()
@@ -214,6 +274,7 @@ namespace CleanSystem
             Find<TextBlock>("ListSubtitle").Text = developer ? "Quét riêng hoặc chạy lệnh trên từng dòng. Lệnh chạy cần xác nhận thư mục đích." : "File tạm được chọn sẵn. Báo cáo lỗi là tùy chọn.";
             Find<TextBlock>("SafetyText").Text = developer ? "Chạy lệnh dọn toàn bộ theo thao tác của từng mục, không áp dụng tuổi file. Kiểm tra lệnh và đích trong bước xác nhận; reset dữ liệu ứng dụng có thể mất cấu hình/lịch sử. Nút Dọn mục đã chọn vẫn chỉ dọn file đủ điều kiện." : "Chỉ dọn các thư mục tạm cho phép trên ổ C. Bỏ qua file đang dùng và đường dẫn liên kết. Không đụng tới Downloads, tài liệu, Registry hay file hệ thống.";
             scanButton.Content = developer ? "Quét Other" : "Quét ổ C";
+            UpdateTempElevationNotice();
             Find<DataGridTemplateColumn>("FolderScanColumn").Visibility = developer ? Visibility.Visible : Visibility.Collapsed;
             Find<DataGridTemplateColumn>("RunCommandColumn").Visibility = developer ? Visibility.Visible : Visibility.Collapsed;
             homeButton.Background = new SolidColorBrush(developer ? Colors.Transparent : Color.FromRgb(41, 57, 81));
@@ -248,6 +309,9 @@ namespace CleanSystem
         }
         public void VerifyInitialUi()
         {
+            if (((ComboBoxItem)ageBox.SelectedItem).Tag.ToString() != "0" ||
+                !ageBox.Items.Cast<ComboBoxItem>().Any(item => item.Tag.ToString() == "7"))
+                throw new InvalidOperationException("Unlimited age must be the default and optional age retention must remain available.");
             if (!diskRefreshButton.IsVisible || !diskRefreshButton.IsEnabled) throw new InvalidOperationException("Disk refresh button is unavailable on this page.");
             var previousGroups = groupsGrid.ItemsSource; var previousScan = scan;
             Find<TextBlock>("FreeText").Text = "Chưa cập nhật";
@@ -313,7 +377,7 @@ namespace CleanSystem
         {
             var files = SelectedFiles();
             selectedText.Text = scan == null ? "—" : Format.Bytes(files.Sum(f => f.Length));
-            selectedCountText.Text = scan == null ? (developerMode ? "Quét để đo cache và dữ liệu" : "Quét để tìm file tạm cũ") : files.Count.ToString("N0") + " file trong các nhóm đã chọn";
+            selectedCountText.Text = scan == null ? (developerMode ? "Quét để đo cache và dữ liệu" : "Quét để tìm file tạm") : files.Count.ToString("N0") + " file trong các nhóm đã chọn";
             Find<TextBlock>("EstimateText").Text = developerMode && scan != null ? "Đã đo: " + Format.Bytes(scan.Groups.Sum(g => g.TotalBytes)) + (scan.Groups.Any(g => g.Partial) ? " (một phần)" : "") : "Ước tính theo kích thước file";
             cleanButton.IsEnabled = !busy && scan != null && !scan.Canceled && files.Count > 0;
             previewButton.IsEnabled = !busy && files.Count > 0;
@@ -321,11 +385,13 @@ namespace CleanSystem
         private void SetBusy(bool value, bool cancellable = true)
         {
             busy = value; busyCanCancel = value && cancellable; scanButton.IsEnabled = !value; ageBox.IsEnabled = !value; groupsGrid.IsEnabled = !value;
+            presentOnlyBox.IsEnabled = !value;
             homeButton.IsEnabled = !value; developerButton.IsEnabled = !value; guideButton.IsEnabled = !value;
             recycleNavButton.IsEnabled = !value; recycleRefreshButton.IsEnabled = !value; recycleOpenButton.IsEnabled = !value;
             Find<ProgressBar>("RecycleProgress").Visibility = value && recycleMode ? Visibility.Visible : Visibility.Collapsed;
             cancelButton.Visibility = value && cancellable ? Visibility.Visible : Visibility.Collapsed;
             cancelButton.IsEnabled = value && cancellable; UpdateSelection(); UpdateRecycleInfo();
+            UpdateTempElevationNotice();
         }
         private void RequestCancel()
         {
@@ -341,6 +407,8 @@ namespace CleanSystem
             var target = singleFolder ? displayedGroups.FirstOrDefault(g => g.Id == groupId && g.IsDeveloper) : null;
             if (singleFolder && (!developerMode || target == null)) return;
             if (singleFolder && !RequireGroupAccess(groupId)) return;
+            if (!developerMode && !administrator() && !declinedTempElevation && displayedGroups.Any(group => group.Id == "windows-temp" && group.Selected))
+                if (RequestTempElevation()) return;
             if (!singleFolder) { scan = null; ResetGroups(); }
             cancellation = new CancellationTokenSource(); SetBusy(true);
             int days = Int32.Parse(((ComboBoxItem)ageBox.SelectedItem).Tag.ToString());
@@ -354,6 +422,9 @@ namespace CleanSystem
                 // A canceled full scan also must not leave candidates that a later folder scan could revive.
                 if (update.Canceled) foreach (var group in update.Groups) group.Files.Clear();
                 scan = singleFolder ? ScanResult.MergeFolderScan(displayedGroups, update, groupId) : update;
+                // Keep the visible filter after a full scan: a row stays when it exists, has its tool, or was measured.
+                if (!singleFolder && onlyPresent)
+                    scan.Groups = scan.Groups.Where(g => g.Measured || g.Applicable).ToList();
                 groupsGrid.ItemsSource = scan.Groups;
                 if (singleFolder) groupsGrid.SelectedItem = scan.Groups.First(g => g.Id == groupId);
                 statusText.Text = (update.Canceled ? "Đã dừng quét " + scope + ". Quét lại mục này trước khi dọn." : update.Limited ? "Có nhóm đạt giới hạn 100.000 mục; kết quả chỉ là một phần." : "Quét xong " + scope + ".") +
@@ -365,7 +436,7 @@ namespace CleanSystem
                 {
                     var failedGroup = cleaner.NewGroups().First(g => g.Id == groupId);
                     failedGroup.State = "Quét không hoàn tất · hãy thử lại";
-                    scan = ScanResult.MergeFolderScan(displayedGroups, new ScanResult { Groups = new List<CleanupGroup> { failedGroup }, CutoffUtc = DateTime.UtcNow.AddDays(-days) }, groupId);
+                    scan = ScanResult.MergeFolderScan(displayedGroups, new ScanResult { Groups = new List<CleanupGroup> { failedGroup }, CutoffUtc = days == 0 ? DateTime.MaxValue : DateTime.UtcNow.AddDays(-days) }, groupId);
                     groupsGrid.ItemsSource = scan.Groups;
                 }
                 else { scan = null; ResetGroups(); }
@@ -380,6 +451,7 @@ namespace CleanSystem
             string groupNames = String.Join("\n", scan.Groups.Where(g => g.Selected && g.Count > 0).Select(g => "• " + g.Name + " — " + g.Count.ToString("N0") + " file (" + g.SizeText + ")"));
             string message = "Xóa vĩnh viễn " + files.Count.ToString("N0") + " file, tổng kích thước " + Format.Bytes(files.Sum(f => f.Length)) + "?\n\n" +
                 groupNames + "\n\nCác file này không được chuyển vào Thùng rác. File đang dùng hoặc thay đổi sau khi quét sẽ bị bỏ qua.\n\nChọn Có để bắt đầu.";
+            if (scan.CutoffUtc == DateTime.MaxValue) message += "\n\nBạn đã chọn Không giới hạn ngày: danh sách gồm cả file tạm mới tạo. Hãy đóng ứng dụng và trình cài đặt liên quan trước khi dọn.";
             if (developerMode) message += "\n\nXác nhận rằng bạn đã đóng IDE và dừng Gradle/build. Cache đã dọn sẽ cần tạo lại; lần build sau có thể chậm hơn.";
             if (!ConfirmAction("Xác nhận dọn file tạm", message)) return;
             DateTime cutoff = scan.CutoffUtc;
@@ -438,20 +510,38 @@ namespace CleanSystem
             var approved = recycleInfo;
             string message = "Xóa vĩnh viễn toàn bộ " + approved.Count.ToString("N0") + " mục trong Thùng rác trên tất cả ổ đĩa của tài khoản hiện tại?\n\n" +
                 "Tổng kích thước Windows báo cáo: " + Format.Bytes(approved.Bytes) + ".\n\n" +
-                "Hãy khôi phục các mục cần giữ trước khi dọn. Không áp dụng ngưỡng tuổi file. Windows xử lý toàn bộ Thùng rác trên tất cả ổ đĩa tại thời điểm chạy; thao tác này không có nút Dừng và không thể khôi phục bằng Thùng rác sau khi hoàn tất.";
+                "Hãy khôi phục các mục cần giữ trước khi dọn. Không áp dụng ngưỡng tuổi file. Khi một mục cần quyền xóa, chọn Có để cho phép hoặc Không để giữ mục đó và tiếp tục. File không xóa được sẽ được bỏ qua. Thao tác này không có nút Dừng và không thể khôi phục bằng Thùng rác sau khi hoàn tất.";
             if (!ConfirmAction("Xác nhận dọn Thùng rác · Tất cả ổ đĩa", message)) return;
             SetBusy(true, false);
             Find<TextBlock>("RecycleStatusText").Text = "Windows đang dọn Thùng rác trên tất cả ổ đĩa. Đợi thao tác hoàn tất…";
             try
             {
-                var result = await recycleService.EmptyAsync(approved, logDirectory);
-                recycleInfo = result.After;
-                Find<TextBlock>("RecycleStatusText").Text = result.Completed ? "Thùng rác trên tất cả ổ đĩa đã trống." : "Chưa hoàn tất: " + result.Error;
-                if (result.LogPath != null) Find<TextBlock>("RecycleStatusText").Text += " Nhật ký đã lưu.";
+                var owner = new System.Windows.Interop.WindowInteropHelper(Window).Handle;
+                var progress = new Progress<RecycleBinProgress>(update => {
+                    if (!busy || !recycleMode) return;
+                    Find<TextBlock>("RecycleStatusText").Text = "Đang dọn: " + (update.Deleted + update.Skipped).ToString("N0") + "/" + update.Total.ToString("N0") +
+                        " mục · Đã xóa " + update.Deleted.ToString("N0") + " · Bỏ qua " + update.Skipped.ToString("N0") +
+                        (update.Current == null ? "" : " · " + update.Current);
+                });
+                var result = await recycleService.EmptyAsync(approved, logDirectory, item => Window.Dispatcher.Invoke(() =>
+                    ConfirmAction("Cho phép xóa mục trong Thùng rác?", "Mục này cần quyền để xóa:\n\n" + item.Name +
+                        "\n\nChọn Có để cho phép Windows thử xóa mục này. Windows có thể hỏi quyền quản trị. Chọn Không để giữ mục này và tiếp tục dọn các mục còn lại.")),
+                    update => ((IProgress<RecycleBinProgress>)progress).Report(update), owner);
+                ShowRecycleResult(result);
                 if (result.Error != null) ShowError(result.Error);
             }
             catch (Exception e) { recycleInfo = null; Find<TextBlock>("RecycleStatusText").Text = "Không hoàn tất việc dọn: " + e.Message; }
             finally { SetBusy(false); RefreshDisk(); }
+        }
+        private void ShowRecycleResult(RecycleBinResult result)
+        {
+            recycleInfo = result.After;
+            string summary = "Đã xóa " + result.Deleted.ToString("N0") + " mục; bỏ qua " + result.Skipped.ToString("N0") + " mục.";
+            if (result.Error != null) summary += " Đã dừng: " + result.Error;
+            else if (result.Completed) summary += " Thùng rác trên tất cả ổ đĩa đã trống.";
+            else if (result.After != null) summary += " Còn " + result.After.Count.ToString("N0") + " mục trong Thùng rác.";
+            if (result.LogPath != null) summary += " Nhật ký đã lưu.";
+            Find<TextBlock>("RecycleStatusText").Text = summary;
         }
         public void VerifyRecyclePage()
         {
@@ -465,12 +555,60 @@ namespace CleanSystem
             if (recycleEmptyButton.IsEnabled || recycleRefreshButton.IsEnabled || recycleNavButton.IsEnabled || cancelButton.Visibility == Visibility.Visible)
                 throw new InvalidOperationException("Recycle operation did not disable controls or incorrectly offered cancellation.");
             SetBusy(false);
+            ShowRecycleResult(new RecycleBinResult { Attempted = true, Finished = true, Deleted = 2, Skipped = 1, After = new RecycleBinInfo(1024, 1) });
+            if (busy || Find<ProgressBar>("RecycleProgress").Visibility != Visibility.Collapsed || !recycleEmptyButton.IsEnabled ||
+                !Find<TextBlock>("RecycleStatusText").Text.Contains("Đã xóa 2 mục; bỏ qua 1 mục."))
+                throw new InvalidOperationException("Skipped recycle items left the UI busy or hid the partial result.");
             Find<TextBlock>("RecycleStatusText").Text = "Dữ liệu mẫu kiểm thử giao diện; chưa đọc hoặc dọn Thùng rác thật.";
             Window.Dispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(delegate { }));
             var content = (FrameworkElement)Window.Content; content.UpdateLayout();
             var bitmap = new RenderTargetBitmap((int)Math.Ceiling(content.ActualWidth), (int)Math.Ceiling(content.ActualHeight), 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(content); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using (var stream = File.Create(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preview-recycle-bin.png"))) encoder.Save(stream);
+            VerifyRecyclePermissionFlow(false);
+            VerifyRecyclePermissionFlow(true);
+        }
+        private sealed class RecycleSmokeBackend : IRecycleBinBackend
+        {
+            public int Deleted, Attempts;
+            public RecycleBinInfo Query(string root) { return new RecycleBinInfo((2 - Deleted) * 1024, 2 - Deleted); }
+            public IList<RecycleBinItem> Snapshot() { return new[] { new RecycleBinItem("Thư mục mẫu cần quyền xóa"), new RecycleBinItem("File mẫu tiếp theo") }; }
+            public RecycleDeleteOutcome Delete(RecycleBinItem item, bool elevation, IntPtr owner) {
+                Attempts++;
+                if (item.Name.StartsWith("Thư mục") && !elevation) return new RecycleDeleteOutcome(false, true, "Fixture needs permission.");
+                Deleted++; return new RecycleDeleteOutcome(true, false, "Fixture only; no real deletion.");
+            }
+        }
+        private void VerifyRecyclePermissionFlow(bool allow)
+        {
+            var backend = new RecycleSmokeBackend();
+            var controller = new MainController(recycleOperations: new RecycleBinService(backend));
+            controller.Window.Owner = Window; controller.Window.ShowActivated = false; controller.Window.ShowInTaskbar = false; controller.Window.Opacity = 0;
+            int prompts = 0;
+            controller.confirmationProbe = (title, message) => {
+                bool permission = title.StartsWith("Cho phép"); if (permission) prompts++;
+                return controller.ConfirmAction(title, message, null,
+                    permission ? (allow ? "preview-recycle-permission-yes.png" : "preview-recycle-permission-no.png") : "preview-recycle-start.png", !permission || allow);
+            };
+            var previousContext = SynchronizationContext.Current;
+            try {
+                controller.Window.Show(); controller.EnterRecycleMode(); controller.recycleInfo = backend.Query(null); controller.UpdateRecycleInfo();
+                // Smoke runs before Application.Run; emulate the context of a real UI click.
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(controller.Window.Dispatcher));
+                var task = controller.EmptyRecycleAsync();
+                var frame = new DispatcherFrame(); var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(20) };
+                var deadline = Stopwatch.StartNew();
+                timer.Tick += delegate { if (task.IsCompleted || deadline.Elapsed > TimeSpan.FromSeconds(5)) frame.Continue = false; };
+                timer.Start(); try { Dispatcher.PushFrame(frame); } finally { timer.Stop(); }
+                if (!task.IsCompleted) throw new InvalidOperationException("Recycle Yes/No flow did not finish without Stop.");
+                task.GetAwaiter().GetResult();
+                controller.Window.Dispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(delegate { }));
+                string expected = allow ? "Đã xóa 2 mục; bỏ qua 0 mục." : "Đã xóa 1 mục; bỏ qua 1 mục.";
+                if (prompts != 1 || backend.Attempts != (allow ? 3 : 2) || controller.busy ||
+                    controller.Find<ProgressBar>("RecycleProgress").Visibility != Visibility.Collapsed ||
+                    !controller.Find<TextBlock>("RecycleStatusText").Text.Contains(expected))
+                    throw new InvalidOperationException("Recycle permission response hid the result or left the UI busy.");
+            } finally { SynchronizationContext.SetSynchronizationContext(previousContext); controller.Window.Close(); }
         }
         private void ShowGuide()
         {
@@ -498,7 +636,7 @@ namespace CleanSystem
             body.Children.Add(new TextBlock { Text = group.Name, FontSize = 24, FontWeight = FontWeights.SemiBold });
             body.Children.Add(new TextBox { Text = group.Root, IsReadOnly = true, BorderThickness = new Thickness(0), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 12) });
             body.Children.Add(new TextBlock { Text = group.Measured ? "Đã đo " + group.TotalSizeText + " trong " + group.TotalCount.ToString("N0") + " file. " + (group.CanClean ? "Đủ điều kiện dọn: " + group.Count.ToString("N0") + " file (" + group.SizeText + ")." : "Chỉ thống kê; quản lý dữ liệu theo hướng dẫn bên dưới.") : "Chưa đo dung lượng. Các con số không xác định dữ liệu còn cần dùng hay không.", TextWrapping = TextWrapping.Wrap });
-            body.Children.Add(new TextBlock { Text = String.IsNullOrEmpty(group.Guidance) ? "Đóng ứng dụng liên quan, quét và xem danh sách trước khi dọn. Chỉ file đủ tuổi và còn nguyên trạng mới được xóa. Xóa vĩnh viễn, không qua Thùng rác." : group.Guidance, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 18, 0, 14), LineHeight = 23 });
+            body.Children.Add(new TextBlock { Text = String.IsNullOrEmpty(group.Guidance) ? "Đóng ứng dụng liên quan, quét và xem danh sách trước khi dọn. Mặc định không giới hạn ngày tạo/sửa file. Nếu chọn giữ file mới hơn 1/7/14/30 ngày, file chưa đủ tuổi sẽ được giữ lại. Chỉ file còn nguyên trạng sau khi quét mới được xóa. Xóa vĩnh viễn, không qua Thùng rác." : group.Guidance, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 18, 0, 14), LineHeight = 23 });
             if (!String.IsNullOrEmpty(group.Commands))
             {
                 body.Children.Add(new TextBlock { Text = "Lệnh tham khảo · có thể sao chép; nút Chạy lệnh trên dòng sẽ hiển thị lệnh thực tế để xác nhận", FontSize = 12, TextWrapping = TextWrapping.Wrap });
@@ -587,16 +725,65 @@ namespace CleanSystem
             if (controller.groupsGrid.SelectedItem == null || warnings != 5) throw new InvalidOperationException("Other groups are incorrectly restricted.");
             controller.Window.Close();
         }
+        public void VerifyTempElevation()
+        {
+            foreach (string scenario in new[] { "no", "uac-no", "failed", "yes", "admin", "busy", "other" })
+            {
+                int launches = 0, prompts = 0; bool elevated = scenario == "admin";
+                var controller = new MainController(() => elevated, elevatedLauncher: info => {
+                    launches++;
+                    if (!info.UseShellExecute || info.Verb != "runas" || info.FileName != Assembly.GetExecutingAssembly().Location || info.Arguments != "--windows-temp-admin 7" || info.RedirectStandardInput)
+                        throw new InvalidOperationException("Elevation is not scoped to relaunching this EXE with the age option.");
+                    if (scenario == "uac-no") throw new System.ComponentModel.Win32Exception(1223);
+                    return scenario != "failed";
+                });
+                controller.Window.Owner = Window; controller.Window.ShowActivated = false; controller.Window.ShowInTaskbar = false; controller.Window.Opacity = 0;
+                controller.confirmationProbe = (title, message) => {
+                    prompts++;
+                    if (!message.Contains("Chưa xóa file") || !message.Contains("Chọn Không") || !message.Contains("UAC")) throw new InvalidOperationException("Missing elevation consent explanation.");
+                    return controller.ConfirmAction(title, message, null, "preview-temp-elevation-" + scenario + ".png", scenario != "no");
+                };
+                try {
+                    controller.Window.Show(); controller.ConfigureWindowsTemp(7);
+                    if (controller.scan != null || ((IEnumerable<CleanupGroup>)controller.groupsGrid.ItemsSource).Any(group => group.Selected != (group.Id == "windows-temp")))
+                        throw new InvalidOperationException("Elevation startup reused candidates or selected other users' temp data.");
+                    if (controller.Find<StackPanel>("TempAdminNotice").Visibility != (elevated ? Visibility.Collapsed : Visibility.Visible))
+                        throw new InvalidOperationException("Temp administrator notice does not reflect current rights.");
+                    if (scenario == "busy") controller.SetBusy(true);
+                    if (scenario == "other") controller.SetMode(true);
+                    bool opened = controller.RequestTempElevation();
+                    bool blocked = scenario == "admin" || scenario == "busy" || scenario == "other";
+                    if (opened != (scenario == "yes") || prompts != (blocked ? 0 : 1) || launches != (blocked || scenario == "no" ? 0 : 1) ||
+                        controller.Window.IsVisible != (scenario != "yes") || controller.scan != null)
+                        throw new InvalidOperationException("Elevation consent/cancel/relaunch flow failed: " + scenario);
+                    if (scenario == "uac-no" && !controller.statusText.Text.Contains("chưa cấp quyền")) throw new InvalidOperationException("UAC refusal was not handled.");
+                    if (scenario == "busy") controller.SetBusy(false);
+                } finally { controller.Window.Close(); }
+            }
+            foreach (int expected in new[] { 0, 1, 7, 14, 30 }) {
+                int parsed;
+                if (!TempElevation.TryReadArguments(new[] { "--windows-temp-admin", expected.ToString() }, out parsed) || parsed != expected)
+                    throw new InvalidOperationException("Elevation startup lost retention setting.");
+            }
+            foreach (string[] invalid in new[] {
+                new[] { "--windows-temp-admin" }, new[] { "--windows-temp-admin", "-1" }, new[] { "--windows-temp-admin", "365" },
+                new[] { "--windows-temp-admin", "0", "delete" }, new[] { "--windows-temp-admin", "C:\\Windows" }
+            }) {
+                bool rejected = false; try { int parsed; TempElevation.TryReadArguments(invalid, out parsed); } catch (ArgumentException) { rejected = true; }
+                if (!rejected) throw new InvalidOperationException("Elevation accepted unexpected startup arguments.");
+            }
+        }
         private bool ConfirmCommand(CommandPlan plan, bool preview = false, bool previewAccept = false)
         {
             bool update = plan.Action == CommandAction.WindowsUpdateDownloads;
             string message = "Đích: " + plan.Target + "\n\n" + plan.Description +
-                "\n\nXóa vĩnh viễn, không qua Thùng rác. Ngưỡng 7/14/30 ngày không áp dụng cho lệnh này." +
+                "\n\nXóa vĩnh viễn, không qua Thùng rác. Lựa chọn thời gian giữ file không áp dụng cho lệnh này." +
                 (update ? "" : " Dừng giữa chừng không khôi phục được phần đã xóa.") + "\n\nBạn có muốn chạy lệnh này?";
             return ConfirmAction(update ? "Xác nhận dọn cache Windows Update" : "Xác nhận chạy lệnh", message, plan.DisplayCommand, preview ? "preview-confirm-" + plan.GroupId + ".png" : null, previewAccept);
         }
         private bool ConfirmAction(string title, string message, string command = null, string previewFile = null, bool previewAccept = false)
         {
+            if (previewFile == null && confirmationProbe != null) return confirmationProbe(title, message);
             var dialog = new Window { Owner = Window, Title = title, Width = 760, Height = 560, MinWidth = 600, MinHeight = 400,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner, FontFamily = new FontFamily("Segoe UI"), FontSize = 14, Background = Brushes.White };
             bool confirmed = false;
@@ -668,15 +855,15 @@ namespace CleanSystem
             {
                 result = await Task.Run(() => commandRunner.Run(plan, logDirectory, operation.Token, line => ((IProgress<string>)progress).Report(line),
                     () => Window.Dispatcher.Invoke(new Action(() => SetBusy(true, false)))));
-                statusText.Text = result.Canceled ? (result.Started ? "Đã dừng cây tiến trình. Dữ liệu đã xóa không được khôi phục; hãy quét lại." : "Đã dừng kiểm tra thư mục; chưa chạy lệnh hoặc xóa dữ liệu.") : result.Error != null ? "Lệnh chưa hoàn tất: " + result.Error : "Lệnh hoàn tất (mã 0). Quét lại thư mục để cập nhật dung lượng.";
+                statusText.Text = result.Canceled ? (result.Started ? "Đã dừng cây tiến trình. Dữ liệu đã xóa không được khôi phục; hãy quét lại." : "Đã dừng kiểm tra thư mục; chưa chạy lệnh hoặc xóa dữ liệu.") : result.Error != null ? "Lệnh chưa hoàn tất: " + result.Error : (result.Summary ?? "Lệnh hoàn tất (mã 0).") + " Quét lại thư mục để cập nhật dung lượng.";
             }
             catch (Exception e) { statusText.Text = "Lệnh gặp lỗi: " + e.Message; ShowError(e.Message); }
             finally
             {
                 // Any command may have changed files even on error/cancellation; never keep deletion snapshots.
                 scan = null; ResetGroups();
-                var refreshed = ((IEnumerable<CleanupGroup>)groupsGrid.ItemsSource).First(g => g.Id == groupId);
-                refreshed.State = "Đã chạy lệnh · cần quét lại"; groupsGrid.SelectedItem = refreshed;
+                var refreshed = ((IEnumerable<CleanupGroup>)groupsGrid.ItemsSource).FirstOrDefault(g => g.Id == groupId);
+                if (refreshed != null) { refreshed.State = "Đã chạy lệnh · cần quét lại"; groupsGrid.SelectedItem = refreshed; }
                 SetBusy(false); cancellation.Dispose(); cancellation = null; RefreshDisk();
             }
             if (result != null) ShowCommandResult(result);
@@ -686,7 +873,7 @@ namespace CleanSystem
             var dialog = new Window { Owner = Window, Title = "Kết quả chạy lệnh", Width = 860, Height = 620, MinWidth = 600, MinHeight = 400,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner, FontFamily = new FontFamily("Segoe UI"), FontSize = 13 };
             var outer = new DockPanel { Margin = new Thickness(20) };
-            var header = new TextBlock { Text = (result.Canceled ? "Đã dừng" : result.Error ?? "Hoàn tất · mã thoát " + result.ExitCode) + "\nNhật ký: " + (result.LogPath ?? "Chưa tạo nhật ký; lệnh chưa bắt đầu."), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) }; DockPanel.SetDock(header, Dock.Top); outer.Children.Add(header);
+            var header = new TextBlock { Text = (result.Canceled ? "Đã dừng" : result.Error ?? result.Summary ?? "Hoàn tất · mã thoát " + result.ExitCode) + "\nNhật ký: " + (result.LogPath ?? "Chưa tạo nhật ký; lệnh chưa bắt đầu."), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) }; DockPanel.SetDock(header, Dock.Top); outer.Children.Add(header);
             outer.Children.Add(new TextBox { Text = result.Output ?? "", IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
                 FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto });
             dialog.Content = outer; dialog.ShowDialog();

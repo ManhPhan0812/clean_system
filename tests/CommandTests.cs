@@ -16,11 +16,24 @@ internal static class CommandTests
         run("command reset removes only its registered root", TestRemoveFolder);
         run("command startup accepts UTF-8 console input with a BOM", TestUtf8Input);
         run("command clear preserves root and removes hidden content", TestClearContents);
+        run("Other clear skips locked files and continues inside folders and later siblings", () => TestLockedContents(false));
+        run("Other folder reset preserves locked files and continues without an interactive prompt", () => TestLockedContents(true));
+        run("cache cleanup summary remains visible when verbose output exceeds the display cap", () => {
+            string root = Folder("large-cache-output");
+            for (int i = 0; i < 400; i++) File.WriteAllText(Path.Combine(root, i.ToString("D4") + new string('x', 100) + ".tmp"), "fixture");
+            var result = Run(Runner(Group("generic-cache", root)), "generic-cache", "logs-large-output");
+            Assert(result.Error == null && result.Summary == "Đã xóa 400 file/thư mục; bỏ qua 0 file/thư mục." && !Directory.EnumerateFileSystemEntries(root).Any() && File.ReadAllText(result.LogPath).Contains("SUMMARY deleted=400; skipped=0"), "Summary was lost when output was capped.");
+        });
         run("command roots with apostrophes/spaces are literal", TestLiteralPath);
         run("command rejects changed targets and unknown ids", TestRejectScope);
         run("recursive command refuses junctions before deleting anything", TestRejectJunction);
         run("command audit creation failure prevents execution", TestAuditFailure);
         run("external CLI receives pinned cache path; exit code and stderr are logged", TestExternalFailure);
+        run("external CLI receives EOF instead of hanging on an input prompt", () => {
+            string root = Folder("cli-input-cache"); string tool = Tool("go-read-input", "set /p cleanSystemAnswer=Mock prompt\r\necho prompt-finished\r\nexit /b 7\r\n");
+            var task = Task.Run(() => Run(Runner(Group("go-modules", root), tool), "go-modules", "logs-cli-input"));
+            Assert(task.Wait(10000) && task.Result.ExitCode == 7 && task.Result.Output.Contains("prompt-finished"), "CLI blocked waiting for text input.");
+        });
         run("canceling command stops a child process before returning", TestCancellation);
         run("FVM selection rejects traversal and all-version flags", TestFvmSelection);
         run("active Java and Codex block respective reset commands", TestActiveOwners);
@@ -69,6 +82,20 @@ internal static class CommandTests
         string root = Folder("space and O'Brien"); File.WriteAllText(Path.Combine(root, "file.txt"), "literal");
         var result = Run(Runner(Group("generic-cache", root)), "generic-cache", "logs-literal");
         Assert(result.Error == null && Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any(), "PowerShell literal quoting failed: " + result.Error);
+    }
+    private static void TestLockedContents(bool removeRoot)
+    {
+        string root = Folder(removeRoot ? "reset-locked" : "clear-locked");
+        string nested = Path.Combine(root, "a-nested"); Directory.CreateDirectory(nested);
+        string locked = Path.Combine(nested, "a-locked.txt"), free = Path.Combine(nested, "z-free.txt"), sibling = Path.Combine(root, "z-later.txt");
+        File.WriteAllText(locked, "locked"); File.WriteAllText(free, "free"); File.WriteAllText(sibling, "later");
+        string id = removeRoot ? "gitnexus-data" : "maven-repository";
+        using (var handle = new FileStream(locked, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
+            var task = Task.Run(() => Run(Runner(Group(id, root)), id, removeRoot ? "logs-reset-locked" : "logs-clear-locked"));
+            Assert(task.Wait(15000), "Cleanup blocked on a locked file instead of skipping it.");
+            var result = task.Result;
+            Assert(result.ExitCode == 2 && result.Error == null && result.Summary != null && result.Output.Contains("SKIPPED") && result.Output.Contains("SUMMARY deleted=") && File.Exists(locked) && !File.Exists(free) && !File.Exists(sibling) && Directory.Exists(root), "Other did not skip/continue correctly: " + result.Output);
+        }
     }
     private static void TestRejectScope()
     {

@@ -1,4 +1,5 @@
 dist/
 test-output/
+build-check/
 *.user
 *.suo

@@ -25,6 +25,8 @@ internal static class CleanerTests
             sandbox = Path.Combine(Path.GetFullPath(args[0]), "fixture-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(sandbox);
             Run("scan is read-only; age and creation gates; nested files", TestScan);
+            Run("age retention explains newly created and recently modified skipped bytes", TestAgeExplanation);
+            Run("unlimited age includes fresh temp files and preserves lock, change and attribute checks", TestUnlimitedAge);
             Run("delete unchanged old file and write audit trail", TestDelete);
             Run("changed and replaced files survive stale snapshots", TestChanged);
             Run("locked file survives; cleanup continues", TestLocked);
@@ -34,6 +36,8 @@ internal static class CleanerTests
             Run("canceled operations do not delete files", TestCancellation);
             Run("audit failure prevents deletion", TestLogFailure);
             Run("production roots are narrowly scoped to C", TestProductionRoots);
+            Run("documented cache variables resolve roots and pin commands", TestEnvironmentRoots);
+            Run("off-drive roots are blocked, never measured or deleted", TestOffDriveBlocked);
             Run("developer inventory counts new and read-only files without selecting them", TestDeveloperInventory);
             Run("inventory-only policy blocks forged cleanup requests", TestInspectOnly);
             Run("Gradle rules preserve dependencies, locks, registry and settings", TestGradleRules);
@@ -77,6 +81,35 @@ internal static class CleanerTests
         var scan = Scan(Engine(root));
         Assert(scan.Groups[0].Count == 1 && scan.Groups[0].Files[0].Path == old, "Scan included new files or missed old file.");
         Assert(File.Exists(old) && File.Exists(recent) && File.Exists(backdated), "Scan deleted a file.");
+    }
+    private static void TestAgeExplanation()
+    {
+        string root = Folder("age-explanation"); string old = OldFile(root, "old.tmp");
+        string fresh = Path.Combine(root, "fresh.tmp"); File.WriteAllText(fresh, "new");
+        string changed = OldFile(root, "recent-write.tmp"); File.SetLastWriteTimeUtc(changed, DateTime.UtcNow);
+        string created = Path.Combine(root, "recent-creation.tmp"); File.WriteAllText(created, "created"); File.SetLastWriteTimeUtc(created, DateTime.UtcNow.AddDays(-30));
+        var result = Scan(Engine(root)); var group = result.Groups[0];
+        long heldBytes = new[] { fresh, changed, created }.Sum(path => new FileInfo(path).Length);
+        Assert(group.Count == 1 && group.Files[0].Path == old && group.AgeSkippedCount == 3 && group.AgeSkippedBytes == heldBytes &&
+            group.AgeSkippedText.Contains("3 file") && !group.Partial && result.Skipped == 3, "Age retention totals/explanation are incorrect.");
+        Assert(Directory.GetFiles(root).Length == 4, "Read-only age scan deleted data.");
+    }
+    private static void TestUnlimitedAge()
+    {
+        string root = Folder("unlimited-age");
+        string fresh = Path.Combine(root, "fresh.tmp"), locked = Path.Combine(root, "locked.tmp"), changed = Path.Combine(root, "changed.tmp"), readOnly = Path.Combine(root, "readonly.tmp");
+        foreach (string path in new[] { fresh, locked, changed, readOnly }) File.WriteAllText(path, "recent fixture");
+        File.SetAttributes(readOnly, FileAttributes.ReadOnly);
+        var engine = Engine(root); var scan = engine.Scan(0, CancellationToken.None, null); var group = scan.Groups[0];
+        Assert(scan.CutoffUtc == DateTime.MaxValue && group.Count == 3 && group.AgeSkippedCount == 0 && group.AgeSkippedText == "", "Unlimited scan excluded recent files or included protected attributes.");
+        Assert(File.Exists(fresh), "Unlimited scan deleted data before confirmation.");
+        string later = Path.Combine(root, "after-scan.tmp"); File.WriteAllText(later, "not approved"); File.AppendAllText(changed, "changed after scan");
+        using (var stream = new FileStream(locked, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
+            var result = Clean(engine, scan, "logs-unlimited");
+            Assert(result.Error == null && result.Deleted == 1 && result.Skipped == 2 && !File.Exists(fresh) && File.Exists(locked) && File.Exists(changed) && File.Exists(readOnly) && File.Exists(later), "Unlimited cleanup bypassed lock/change/snapshot checks.");
+        }
+        bool rejected = false; try { engine.Scan(-1, CancellationToken.None, null); } catch (ArgumentOutOfRangeException) { rejected = true; }
+        Assert(rejected, "Negative retention accepted.");
     }
     private static void TestDelete()
     {
@@ -174,7 +207,8 @@ internal static class CleanerTests
     {
         foreach (var group in new Cleaner().NewGroups())
         {
-            Assert(PathPolicy.IsOnC(group.Root), "Production root outside C.");
+            Assert(PathPolicy.IsOnC(group.Root) || group.BlockedReason != null, "Production root outside C without a block.");
+            Assert(!(group.BlockedReason != null && (group.CanClean || group.Selected)), "Blocked root stayed cleanable or selected.");
             if (!group.IsDeveloper)
                 Assert(group.Root.EndsWith("\\Temp", StringComparison.OrdinalIgnoreCase) || group.Root.EndsWith("\\WER\\ReportArchive", StringComparison.OrdinalIgnoreCase) || group.Root.EndsWith("\\WER\\ReportQueue", StringComparison.OrdinalIgnoreCase), "Broad production root.");
             else
@@ -183,6 +217,39 @@ internal static class CleanerTests
                 Assert(!group.CanClean || group.Rule == CleanupRule.GradleDerived || group.Rule == CleanupRule.GradleLogs, "Unreviewed developer data may be deleted.");
             }
         }
+    }
+    private static void TestEnvironmentRoots()
+    {
+        string cache = Folder("env-go-modcache");
+        string previous = Environment.GetEnvironmentVariable("GOMODCACHE");
+        try
+        {
+            Environment.SetEnvironmentVariable("GOMODCACHE", cache);
+            var group = new Cleaner().NewGroups().Single(g => g.Id == "go-modules");
+            Assert(group.Root == PathPolicy.Normalize(cache), "Documented cache variable did not resolve the root.");
+            Assert(group.Rule == CleanupRule.InspectOnly && !group.CanClean && !group.Selected, "Resolved root changed its cleanup policy.");
+            string tool = OldFile(Folder("env-tools"), @"go.exe");
+            var plan = new CommandRunner(new Cleaner().NewGroups(), false, name => tool, () => false, () => false).Prepare("go-modules");
+            Assert(plan.DisplayCommand.Contains(PathPolicy.Normalize(cache)), "Command did not pin the resolved cache root.");
+        }
+        finally { Environment.SetEnvironmentVariable("GOMODCACHE", previous); }
+    }
+    private static void TestOffDriveBlocked()
+    {
+        var engine = new Cleaner(new[] { new CleanupGroup("off-drive", "Ngoài ổ C", "", @"D:\clean-system-off-drive", true, CleanupRule.InspectOnly) }, null, null, true);
+        var blocked = engine.NewGroups().Single();
+        Assert(blocked.BlockedReason != null && !blocked.CanClean && !blocked.CanRunCommand && !blocked.Selected, "Off-drive root was not blocked.");
+        Assert(blocked.AvailabilityText == blocked.BlockedReason, "Blocked row does not explain itself.");
+        var scan = engine.Scan(0, CancellationToken.None, null, true);
+        Assert(scan.Groups.Count == 1 && scan.Groups[0].State == blocked.BlockedReason && !scan.Groups[0].Measured, "Scan touched an off-drive root.");
+        var forged = new FileCandidate { Path = @"D:\clean-system-off-drive\file.tmp", Root = blocked.Root, Length = 1 };
+        var result = engine.Clean(new[] { forged }, DateTime.UtcNow, Path.Combine(sandbox, "logs-off-drive"), CancellationToken.None, null);
+        Assert(result.Deleted == 0 && result.Skipped == 1, "Off-drive root was deletable.");
+        var fixture = new Cleaner(new[] { new CleanupGroup("present", "Present", "", Folder("env-present"), true, CleanupRule.InspectOnly) });
+        var present = fixture.NewGroups().Single();
+        Assert(present.Present && present.ToolPresent && present.AvailabilityText.Length == 0, "Existing root without a CLI was reported unavailable.");
+        var missing = new Cleaner(new[] { new CleanupGroup("missing", "Missing", "", Path.Combine(sandbox, "env-missing"), true, CleanupRule.InspectOnly) });
+        Assert(!missing.NewGroups().Single().Present && !missing.NewGroups().Single().Applicable, "Missing root was reported present or stayed in the filtered list.");
     }
     private static void TestDeveloperInventory()
     {

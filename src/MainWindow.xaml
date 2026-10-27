@@ -107,7 +107,7 @@
           <StackPanel>
             <TextBlock Text="DUNG LƯỢNG ĐANG CHỌN" FontSize="11" Foreground="#88674F" FontWeight="SemiBold" />
             <TextBlock x:Name="SelectedText" Text="—" FontSize="30" FontWeight="SemiBold" Margin="0,8,0,8" />
-            <TextBlock x:Name="SelectedCountText" Text="Quét để tìm file tạm cũ" Foreground="#88674F" FontSize="12" />
+            <TextBlock x:Name="SelectedCountText" Text="Quét để tìm file tạm" Foreground="#88674F" FontSize="12" />
             <TextBlock x:Name="EstimateText" Text="Ước tính theo kích thước file" Foreground="#88674F" FontSize="11" Margin="0,10,0,0" />
           </StackPanel>
         </Border>
@@ -116,8 +116,12 @@
         <StackPanel><TextBlock x:Name="ListTitle" Text="Chọn nhóm cần dọn" FontSize="18" FontWeight="SemiBold" />
           <TextBlock x:Name="ListSubtitle" Text="File tạm được chọn sẵn. Báo cáo lỗi là tùy chọn." FontSize="12" Foreground="{StaticResource Muted}" Margin="0,5,0,0" /></StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-          <TextBlock Text="Giữ file mới hơn" VerticalAlignment="Center" FontSize="12" Margin="0,0,10,0" Foreground="{StaticResource Muted}" />
-          <ComboBox x:Name="AgeBox" Width="96" Padding="8,6" SelectedIndex="1">
+          <CheckBox x:Name="PresentOnlyBox" Content="Chỉ hiện mục có trên máy" FontSize="12" VerticalAlignment="Center" Margin="0,0,18,0"
+                    ToolTip="Ẩn mục không có thư mục và không có công cụ tương ứng trên máy này. Bỏ chọn để xem đủ danh sách." />
+          <TextBlock Text="Tuổi file" VerticalAlignment="Center" FontSize="12" Margin="0,0,10,0" Foreground="{StaticResource Muted}" />
+          <ComboBox x:Name="AgeBox" Width="170" Padding="8,6" SelectedIndex="0"
+                    ToolTip="Không giới hạn ngày: xét cả file mới. Các mức 1/7/14/30 ngày giữ lại file mới hơn ngưỡng. File đang dùng, được bảo vệ hoặc thay đổi sau khi quét vẫn bị bỏ qua.">
+            <ComboBoxItem Content="Không giới hạn ngày" Tag="0" />
             <ComboBoxItem Content="1 ngày" Tag="1" /><ComboBoxItem Content="7 ngày" Tag="7" />
             <ComboBoxItem Content="14 ngày" Tag="14" /><ComboBoxItem Content="30 ngày" Tag="30" />
           </ComboBox>
@@ -137,6 +141,16 @@
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" />
                   <TextBlock Text="{Binding Description}" FontSize="10" Foreground="#657084" Margin="0,5,0,0" TextWrapping="Wrap" />
                   <TextBlock Text="{Binding State}" FontSize="10" Foreground="#657084" Margin="0,4,0,0" />
+                  <TextBlock Text="{Binding AvailabilityText}" FontSize="10" Foreground="#88674F" Margin="0,4,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock">
+                      <Style.Triggers><DataTrigger Binding="{Binding AvailabilityText}" Value=""><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+                    </Style></TextBlock.Style>
+                  </TextBlock>
+                  <TextBlock Text="{Binding AgeSkippedText}" FontSize="10" Foreground="#88674F" Margin="0,4,0,0" TextWrapping="Wrap">
+                    <TextBlock.Style><Style TargetType="TextBlock">
+                      <Style.Triggers><DataTrigger Binding="{Binding AgeSkippedText}" Value=""><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+                    </Style></TextBlock.Style>
+                  </TextBlock>
                 </StackPanel>
               </DataTemplate></DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
@@ -154,7 +168,7 @@
             </DataGridTemplateColumn>
             <DataGridTemplateColumn x:Name="RunCommandColumn" Header="THAO TÁC" Width="145" IsReadOnly="True">
               <DataGridTemplateColumn.CellTemplate><DataTemplate>
-                <Button Content="{Binding RunButtonText}" Tag="run-group" IsEnabled="{Binding CanRunCommand}" FontSize="11" Padding="9,8" Margin="6" VerticalAlignment="Center" Background="#FFF0E4" BorderBrush="#EBCDB5" ToolTip="Chạy lệnh cho mục này sau khi xác nhận">
+                <Button Content="{Binding RunButtonText}" Tag="run-group" IsEnabled="{Binding CanRunCommand}" FontSize="11" Padding="9,8" Margin="6" VerticalAlignment="Center" Background="#FFF0E4" BorderBrush="#EBCDB5" ToolTip="{Binding RunHint}">
                   <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                     <Setter Property="Visibility" Value="Collapsed" />
                     <Style.Triggers><DataTrigger Binding="{Binding IsDeveloper}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
@@ -166,8 +180,14 @@
         </DataGrid>
       </Border>
       <Border Grid.Row="4" Background="#ECF1F7" CornerRadius="8" Padding="14,11" Margin="0,14,0,0">
+        <StackPanel>
         <TextBlock x:Name="SafetyText" FontSize="12" Foreground="#53657D" TextWrapping="Wrap" LineHeight="19"
           Text="Chỉ dọn các thư mục tạm cho phép trên ổ C. Bỏ qua file đang dùng và đường dẫn liên kết. Không đụng tới Downloads, tài liệu, Registry hay file hệ thống." />
+          <StackPanel x:Name="TempAdminNotice" Margin="0,8,0,0" Visibility="Collapsed">
+            <TextBlock Text="Chưa có quyền quản trị: một số mục Windows Temp chưa thể quét/dọn. Cấp quyền rồi quét lại để xem đầy đủ hơn." TextWrapping="Wrap" FontSize="12" Foreground="#88674F" />
+            <Button x:Name="TempAdminButton" Content="Cấp quyền Windows Temp" HorizontalAlignment="Left" FontSize="12" Padding="10,6" Margin="0,7,0,0" />
+          </StackPanel>
+        </StackPanel>
       </Border>
       <Grid Grid.Row="5" Margin="0,17,0,0">
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
