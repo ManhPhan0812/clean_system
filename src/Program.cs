@@ -19,9 +19,9 @@ using System.Windows.Threading;
 [assembly: AssemblyDescription("Ứng dụng dọn file tạm, cache lập trình và Thùng rác trên Windows.")]
 [assembly: AssemblyCompany("Until You")]
 [assembly: AssemblyCopyright("by Until You")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyInformationalVersion("1.0.1")]
 
 namespace CleanSystem
 {
@@ -832,7 +832,7 @@ namespace CleanSystem
             try
             {
                 string version = null;
-                if (CommandRunner.ActionFor(groupId) == CommandAction.FvmVersion) { version = ChooseFvmVersion(group); if (version == null) return; }
+                if (group.EffectiveAction == CommandAction.FvmVersion) { version = ChooseFvmVersion(group); if (version == null) return; }
                 plan = commandRunner.Prepare(groupId, version);
                 if (plan.Action == CommandAction.OpenEditor)
                 {

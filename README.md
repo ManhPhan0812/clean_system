@@ -1,6 +1,6 @@
 # Dọn dẹp ổ cứng
 
-**v1.0.0** · **by Until You**
+**v1.0.1** · **by Until You**
 
 Ứng dụng desktop tiếng Việt để quét và dọn **file tạm trên ổ C**, đồng thời thống kê **Other / dữ liệu lập trình**, viết bằng C# / WPF. Chạy tại máy, không gửi dữ liệu lên mạng, không cần cài Node.js, Python hoặc .NET SDK.
 
@@ -97,7 +97,9 @@ Kiểm thử dùng thư mục fixture, dịch vụ và trạng thái cập nhậ
 
 `Remove-Item -Recurse -Force .gitnexus` xóa thư mục tương đối trong vị trí terminal hiện tại. Dòng GitNexus của ứng dụng thống kê `%USERPROFILE%\.gitnexus`; lệnh sao chép nhắm chính xác vị trí đó, xóa cả `indexes`, `registry.json` và dữ liệu khác nếu có. Dừng server/MCP, kiểm tra và sao lưu dữ liệu cần giữ trước khi xóa. Để chỉ xóa index của một dự án, đối chiếu `gitnexus clean` trong đúng dự án theo [mã nguồn chính thức của GitNexus](https://github.com/abhigyanpatwari/GitNexus/blob/main/gitnexus/src/cli/clean.ts); không nhầm thư mục tài khoản với thư mục trong repository.
 
-Các đường dẫn thống kê là **vị trí mặc định** của tài khoản hiện tại. Ứng dụng đọc thêm biến môi trường cache do chính công cụ công bố — `GRADLE_USER_HOME`, `GOMODCACHE`, `GOCACHE`, `PUB_CACHE`, `FVM_CACHE_PATH`, `CODEX_HOME` — và dùng giá trị đó thay cho đường mặc định; biến không đặt, không phải đường dẫn tuyệt đối hoặc không dùng được thì giữ mặc định. Ứng dụng vẫn không đọc `GOPATH` khi khác `GOMODCACHE`, Maven `settings.xml` hay cấu hình riêng khác, nên cache tùy chỉnh ngoài các biến trên cần quản lý bằng chính công cụ đó.
+Các đường dẫn thống kê là **vị trí mặc định** của tài khoản hiện tại. Ứng dụng đọc thêm biến môi trường cache do chính công cụ công bố — `GRADLE_USER_HOME`, `GOMODCACHE`, `GOCACHE`, `PUB_CACHE`, `FVM_CACHE_PATH`, `CODEX_HOME` — và dùng giá trị đó thay cho đường mặc định; biến không đặt, không phải đường dẫn tuyệt đối hoặc không dùng được thì giữ mặc định. Với Go, ứng dụng hỏi chính Go trước (`go env GOMODCACHE` / `go env GOCACHE`, mỗi lệnh tối đa 3 giây, không hỏi khi Go không có trong PATH), rồi mới fallback về biến và đường mặc định. Ứng dụng vẫn không đọc `GOPATH` khi khác `GOMODCACHE`, Maven `settings.xml` hay cấu hình riêng khác, nên cache tùy chỉnh ngoài các biến trên cần quản lý bằng chính công cụ đó.
+
+Ngoài các mục đã review, ứng dụng còn **phát hiện thêm trên máy này** khi khởi động: cache do npm (`npm config get cache`), pip (`pip cache dir`) và NuGet (`dotnet nuget locals global-packages`) báo cáo, cùng các thư mục dot trong home có tên chứa `cache`, cộng `.npm` và `.pnpm-store` (không lấy các thư mục container như `.nuget`, `.cargo`, `.gradle` vì cache của chúng là thư mục con đã có dòng riêng). Các dòng phát hiện này luôn là **chỉ thống kê** (`InspectOnly`): chỉ đo dung lượng, không có nút dọn, không có nút chạy lệnh, và vẫn bị chặn nếu nằm ngoài ổ C. Phát hiện chạy một lần khi khởi động, nên cài thêm công cụ sau khi mở ứng dụng cần khởi động lại mới thấy dòng mới; còn trạng thái có thư mục/có CLI của các dòng sẵn có vẫn được đọc lại mỗi lần mở màn hình.
 
 Nếu biến trỏ ra ngoài ổ C, dòng vẫn hiển thị nhưng ghi **Ngoài ổ C · chỉ hiển thị, không quét** và không được đo hay dọn. Với Go/Pub/FVM, runner ghim biến cache vào **đúng đường dẫn hiển thị** (đường đã resolve) để không vô tình dọn cache tùy chỉnh ở nơi khác; biến môi trường của hệ thống không bị thay đổi. CLI cần được cài và có trong PATH; thiếu CLI thì nút Chạy lệnh bị tắt và không chạy lệnh. Lệnh dùng thư mục làm việc của ứng dụng, không chạy trong repository của bạn. Chuyển màn hình, đổi thời gian giữ file hoặc đổi bộ lọc hiển thị sẽ bỏ kết quả quét cũ.
 
@@ -114,7 +116,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1 -Test
 
 Script dùng trình biên dịch .NET Framework có sẵn trong Windows. Đầu ra: `dist\DonDepOCung.exe`. XAML nhúng trong `.exe`, không cần mang theo thư mục `src`.
 
-Bản phát hành hiện tại là **v1.0.0**, tác giả **by Until You**, tại `dist\DonDepOCung.exe`. Thư mục `dist` không được đưa vào Git. Nếu `.exe` đang chạy, đóng ứng dụng trước khi build lại vào cùng đường dẫn.
+Bản phát hành hiện tại là **v1.0.1**, tác giả **by Until You**, tại `dist\DonDepOCung.exe`. Thư mục `dist` không được đưa vào Git. Nếu `.exe` đang chạy, đóng ứng dụng trước khi build lại vào cùng đường dẫn.
 
 GitHub Actions build và chạy kiểm thử trên Windows khi push tag phiên bản (ví dụ `v1.0.0`). Phiên bản trong EXE phải khớp tag và có nội dung phát hành tại `releases\<tag>.md`. Workflow tải EXE lên bản nháp, kiểm tra dung lượng và SHA-256 trên GitHub rồi mới công khai release. EXE được tải qua Releases; mã nguồn giữ riêng trong repository.
 
@@ -123,6 +125,7 @@ Kiểm thử tạo fixture riêng trong `test-output`, không dọn thư mục t
 ## Cấu trúc
 
 - `src/Cleaner.cs`: chính sách đường dẫn, quét, xóa bằng Windows file handle, nhật ký.
+- `src/Discovery.cs`: phát hiện Other theo hệ thống — hỏi tool về cache của nó, fallback về biến môi trường và đường mặc định, phát hiện thêm cache trên máy; dòng phát hiện luôn chỉ thống kê.
 - `src/Program.cs`: điều khiển giao diện và thao tác bất đồng bộ.
 - `src/Commands.cs`: tạo lệnh cố định, kiểm tra đích, chạy CLI/PowerShell, audit và dừng cây tiến trình.
 - `src/WindowsUpdate.cs`: lưu ý, quyền quản trị, kiểm tra trạng thái cập nhật và thao tác cache với khởi động lại dịch vụ trong finally.
@@ -131,6 +134,7 @@ Kiểm thử tạo fixture riêng trong `test-output`, không dọn thư mục t
 - `src/ShellRecycleBin.cs`: lấy danh sách mục Shell và xóa riêng từng mục qua IFileOperation, phân biệt xóa/bỏ qua/yêu cầu quyền.
 - `src/MainWindow.xaml`: giao diện WPF.
 - `tests/CleanerTests.cs`: kiểm thử bằng file và liên kết thật trong fixture.
+- `tests/DiscoveryTests.cs`: kiểm thử phát hiện theo hệ thống bằng tool giả và home giả — tool thắng fallback, tool lỗi thì fallback, dòng phát hiện trùng/loại nhạy cảm bị loại, dòng phát hiện ngoài ổ C bị chặn, chính sách override trên nhóm.
 - `tests/CommandTests.cs`: chạy lệnh xóa trên fixture, CLI giả, kiểm tra quoting, junction, audit, lỗi và hủy tiến trình con; không chạy lệnh dọn thật của Go/Flutter/FVM.
 - `tests/RecycleBinTests.cs`: kiểm tra phạm vi, xác nhận cũ, audit, chọn Có/Không, từ chối UAC, bỏ qua rồi tiếp tục, xử lý thông điệp STA; kiểm tra Shell delete với file/thư mục fixture và đọc Thùng rác thật.
 - `tests/WindowsUpdateTests.cs`: kiểm tra cache cập nhật trên fixture, mock toàn bộ dịch vụ/WUA, lỗi stop/start, file bị khóa, kiểm tra lại đích và hoàn thành khởi động lại dịch vụ khi đóng Job Object.

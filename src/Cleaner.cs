@@ -28,15 +28,25 @@ namespace CleanSystem
         public string Guidance { get; private set; }
         public string Commands { get; private set; }
         public string DocumentationUrl { get; private set; }
+        // Policy carried by the group itself, so a row discovered at runtime
+        // does not have to be added to the static switches in CommandRunner.
+        // Null means "fall back to the reviewed mapping for this Id", which
+        // keeps groups built by older callers (including tests) working.
+        // Discovered rows leave both null and get EffectiveAction == None.
+        public CommandAction? ActionOverride { get; private set; }
+        public string RequiredToolOverride { get; private set; }
+        public string Source { get; private set; }
+        public CommandAction EffectiveAction { get { return ActionOverride ?? CommandRunner.ActionFor(Id); } }
+        public string EffectiveRequiredTool { get { return RequiredToolOverride ?? CommandRunner.ToolFor(Id); } }
         // A root resolved from the environment can fall outside C: keep the row visible but never measure or delete it.
         public string BlockedReason { get; internal set; }
         public bool Present { get; internal set; }
         public bool ToolPresent { get; internal set; }
-        public string RequiredTool { get { return CommandRunner.ToolFor(Id); } }
+        public string RequiredTool { get { return EffectiveRequiredTool; } }
         // Visible list filter: a row is relevant when its folder exists or the tool that would create it is installed.
         public bool Applicable { get { return Present || (RequiredTool != null && ToolPresent); } }
-        public bool CanRunCommand { get { return IsDeveloper && BlockedReason == null && CommandRunner.ActionFor(Id) != CommandAction.None && ToolPresent; } }
-        public string RunButtonText { get { return CommandRunner.ButtonText(Id); } }
+        public bool CanRunCommand { get { return IsDeveloper && BlockedReason == null && EffectiveAction != CommandAction.None && ToolPresent; } }
+        public string RunButtonText { get { return CommandRunner.ButtonTextForAction(EffectiveAction, Id); } }
         public string RunHint
         {
             get
@@ -82,11 +92,13 @@ namespace CleanSystem
         public string SizeText { get { return CanClean ? Format.Bytes(Bytes) : "—"; } }
         public int Count { get { return Files.Count; } }
         public CleanupGroup(string id, string name, string description, string root,
-            bool developer = false, CleanupRule rule = CleanupRule.Temporary, string guidance = "", string commands = "", string documentationUrl = "")
+            bool developer = false, CleanupRule rule = CleanupRule.Temporary, string guidance = "", string commands = "", string documentationUrl = "",
+            CommandAction? action = null, string requiredTool = null, string source = null)
         {
             Id = id; Name = name; Description = description;
             Root = PathPolicy.Normalize(root);
             IsDeveloper = developer; Rule = rule; Guidance = guidance; Commands = commands; DocumentationUrl = documentationUrl;
+            ActionOverride = action; RequiredToolOverride = requiredTool; Source = source;
             Selected = id == "user-temp" || id == "windows-temp" || id == "fixture";
             if (!CanClean || developer) Selected = false;
             State = "Chưa quét"; Files = new List<FileCandidate>();
@@ -259,13 +271,14 @@ namespace CleanSystem
         {
             return definitions.Select(g =>
             {
-                var copy = new CleanupGroup(g.Id, g.Name, g.Description, g.Root, g.IsDeveloper, g.Rule, g.Guidance, g.Commands, g.DocumentationUrl);
+                var copy = new CleanupGroup(g.Id, g.Name, g.Description, g.Root, g.IsDeveloper, g.Rule, g.Guidance, g.Commands, g.DocumentationUrl, g.ActionOverride, g.RequiredToolOverride, g.Source);
                 copy.BlockedReason = g.BlockedReason; copy.Present = g.Present; copy.ToolPresent = g.ToolPresent;
                 return copy;
             }).ToList();
         }
         private static List<CleanupGroup> DefaultGroups()
         {
+            string user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             string common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
@@ -278,6 +291,11 @@ namespace CleanSystem
                 new CleanupGroup("system-wer-queue", "Báo cáo hệ thống đang chờ", "Có thể mất báo cáo chưa gửi · tùy chọn", Path.Combine(common, @"Microsoft\Windows\WER\ReportQueue"))
             };
             groups.AddRange(DeveloperGroups());
+            // Rows discovered on this machine (tool-reported caches and
+            // cache-like home folders). They are InspectOnly by construction,
+            // so discovery can only add measurement, never deletion or a
+            // command. Discovery runs once per Cleaner, not on every reset.
+            groups.AddRange(SystemDiscovery.DiscoverExtraGroups(user, groups.Select(g => g.Root)));
             // System temp/report roots are only in scope on C:. A developer root that resolves to another
             // drive stays visible (blocked) instead of disappearing, so a custom cache is explained, not hidden.
             groups.RemoveAll(g => !g.IsDeveloper && !PathPolicy.IsOnC(g.Root));
@@ -289,8 +307,11 @@ namespace CleanSystem
             string user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string gradle = RootResolution.Resolve(Path.Combine(user, ".gradle"), "GRADLE_USER_HOME");
-            string goModules = RootResolution.Resolve(Path.Combine(user, @"go\pkg\mod"), "GOMODCACHE");
-            string goBuild = RootResolution.Resolve(Path.Combine(local, "go-build"), "GOCACHE");
+            // Ask Go itself first (`go env` honours GOMODCACHE/GOCACHE), then
+            // fall back to the variable and the default location. If Go is
+            // not installed, this is exactly the previous behaviour.
+            string goModules = SystemDiscovery.ResolveToolCache("go", "env GOMODCACHE", Path.Combine(user, @"go\pkg\mod"), "GOMODCACHE");
+            string goBuild = SystemDiscovery.ResolveToolCache("go", "env GOCACHE", Path.Combine(local, "go-build"), "GOCACHE");
             string pubCache = RootResolution.Resolve(Path.Combine(local, @"Pub\Cache"), "PUB_CACHE");
             string fvm = RootResolution.Resolve(Path.Combine(user, "fvm"), "FVM_CACHE_PATH");
             string codex = RootResolution.Resolve(Path.Combine(user, ".codex"), "CODEX_HOME");

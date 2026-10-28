@@ -48,6 +48,7 @@ internal static class CleanerTests
             Run("unknown or wrong-mode folder ids never trigger a full scan", TestInvalidFolderScan);
             Run("successive folder scans preserve other results and replace only the target", TestMergeFolderScans);
             Run("canceling a folder rescan clears only that folder's cleanup candidates", TestCanceledFolderRescan);
+            DiscoveryTests.RunAll(sandbox, Run);
             CommandTests.RunAll(sandbox, Run);
             RecycleBinTests.RunAll(sandbox, Run);
             WindowsUpdateTests.RunAll(sandbox, Run);

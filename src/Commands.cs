@@ -106,7 +106,11 @@ namespace CleanSystem
         }
         public static string ButtonText(string id)
         {
-            switch (ActionFor(id))
+            return ButtonTextForAction(ActionFor(id), id);
+        }
+        public static string ButtonTextForAction(CommandAction action, string id)
+        {
+            switch (action)
             {
                 case CommandAction.WindowsUpdateDownloads: return "Dọn cache cập nhật";
                 case CommandAction.FvmVersion: return "Chọn SDK / chạy";
@@ -117,14 +121,14 @@ namespace CleanSystem
         private CleanupGroup Definition(string id)
         {
             var group = definitions.SingleOrDefault(g => g.Id == id && g.IsDeveloper);
-            if (group == null || ActionFor(id) == CommandAction.None) throw new ArgumentException("Mục này không có lệnh được hỗ trợ.");
+            if (group == null || group.EffectiveAction == CommandAction.None) throw new ArgumentException("Mục này không có lệnh được hỗ trợ.");
             if (requireCDrive && !PathPolicy.IsOnC(group.Root)) throw new IOException("Lệnh chỉ được chạy trong các thư mục cho phép trên ổ C.");
             return group;
         }
         public CommandPlan Prepare(string id, string version = null)
         {
             var group = Definition(id);
-            var plan = new CommandPlan { GroupId = id, Root = group.Root, Target = group.Root, Action = ActionFor(id), Version = version };
+            var plan = new CommandPlan { GroupId = id, Root = group.Root, Target = group.Root, Action = group.EffectiveAction, Version = version };
             switch (plan.Action)
             {
                 case CommandAction.WindowsUpdateDownloads:
@@ -249,7 +253,7 @@ namespace CleanSystem
         private void ValidatePlan(CommandPlan plan)
         {
             var group = Definition(plan.GroupId);
-            if (!String.Equals(group.Root, plan.Root, StringComparison.OrdinalIgnoreCase) || plan.Action != ActionFor(group.Id)) throw new IOException("Lệnh hoặc đích không khớp danh sách cho phép.");
+            if (!String.Equals(group.Root, plan.Root, StringComparison.OrdinalIgnoreCase) || plan.Action != group.EffectiveAction) throw new IOException("Lệnh hoặc đích không khớp danh sách cho phép.");
             string expected = plan.Action == CommandAction.FvmVersion ? PathPolicy.Normalize(Path.Combine(group.Root, "versions", plan.Version ?? "")) : group.Root;
             if (!String.Equals(expected, plan.Target, StringComparison.OrdinalIgnoreCase)) throw new IOException("Đường dẫn đích đã bị thay đổi.");
             var fresh = Prepare(plan.GroupId, plan.Version);

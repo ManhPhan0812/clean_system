@@ -70,7 +70,7 @@
             <StackPanel><TextBlock Text="Bạn quyết định xóa gì." Foreground="#E4ECF8" FontWeight="SemiBold" FontSize="12" />
               <TextBlock Text="Quét trước, xem lại rồi dọn.&#10;Không tự chạy nền." Foreground="#A9B8CC" FontSize="12" Margin="0,8,0,0" LineHeight="20" /></StackPanel>
           </Border>
-          <TextBlock Text="v1.0.0  ·  Windows desktop" Foreground="#8293AD" FontSize="11" Margin="4,18,0,0" />
+          <TextBlock Text="v1.0.1  ·  Windows desktop" Foreground="#8293AD" FontSize="11" Margin="4,18,0,0" />
           <TextBlock Text="by Until You" Foreground="#B4C0D4" FontSize="12" FontStyle="Italic" Margin="4,7,0,0" />
         </StackPanel>
       </Grid>
